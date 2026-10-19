@@ -232,8 +232,19 @@ EOF
 # 参数解析：--yes/--purge/--non-interactive 等；无参子命令透传多余参数
 # 由 do_* 侧 warning 忽略，不阻断分发）。
 budget_main() {
+    # 「budget setup <子命令>」前缀形式：剥离 setup 后重新分发；
+    # 裸 budget setup（无后续参数）显示帮助（避免意外触发 init）。
+    if [[ "${1:-}" == "setup" ]]; then
+        shift
+        if [[ $# -eq 0 ]]; then
+            budget_cmd_help
+            return 0
+        fi
+        budget_main "$@"
+        return
+    fi
     case "${1:-help}" in
-        init|setup)
+        init)
             if [[ "${2:-}" == "shell" ]]; then
                 budget_setup_shell_alias
             else

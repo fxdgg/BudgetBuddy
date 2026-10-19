@@ -48,7 +48,7 @@
     "lib/utils.sh": "30b19c43c8667c9769db1eb47ef2089e75b84d86eb427636342030dd78e1d2d8",
     "lib/validate.sh": "4ec156e288b91abe37defe921db1477dabc3a95ec0674b7b1f75ee522e7ca00b",
     "personas.json": "3e9f3dba4c4eda57672810685640260c8cc14d57b5dff3d8b832f78f48237b83",
-    "setup.sh": "f6de0f5dc04a8e6d0386b277c59ff051ec61a13560c893dfbf6b9dbffe8f4895",
+    "setup.sh": "fe1a1f4f55dbe39872d7d20354eb51c6aefd4b143cd562e59216bde7024cf00a",
     "skill/budget-notify/SKILL.md": "5e9f2e7256265d2515a7f191798fa718bd19e97677c42d1d7b51fd15b7ccaa35",
     "skill/budget-notify/load-env.sh": "656696c623ea49c934c74c8a46d27005ae7c1c6d601c2f1fbec0375f7aed2cf0",
     "skill/budget-notify/notify.py": "b5d9b335641da2aa5b303ceda73973dbf9aacab9df3c070b26c7d1f8ec28f97c",

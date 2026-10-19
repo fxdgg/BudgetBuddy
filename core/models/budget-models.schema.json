@@ -1,0 +1,381 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "codebuddyModelId": {
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9.-]*$",
+      "type": "string"
+    },
+    "codebuddyPresets": {
+      "additionalProperties": false,
+      "properties": {
+        "presets": {
+          "additionalProperties": false,
+          "properties": {
+            "balanced": {
+              "$ref": "#/definitions/codebuddyRoleMap"
+            },
+            "economic": {
+              "$ref": "#/definitions/codebuddyRoleMap"
+            },
+            "quality": {
+              "$ref": "#/definitions/codebuddyRoleMap"
+            }
+          },
+          "required": [
+            "economic",
+            "balanced",
+            "quality"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "presets"
+      ],
+      "type": "object"
+    },
+    "codebuddyRoleMap": {
+      "additionalProperties": false,
+      "description": "model_role → CodeBuddy 模型 ID（须覆盖全部 10 个角色键，值为目录中的模型 ID）",
+      "properties": {
+        "architect": {
+          "$ref": "#/definitions/codebuddyModelId"
+        },
+        "coder_lite": {
+          "$ref": "#/definitions/codebuddyModelId"
+        },
+        "coder_senior": {
+          "$ref": "#/definitions/codebuddyModelId"
+        },
+        "coder_standard": {
+          "$ref": "#/definitions/codebuddyModelId"
+        },
+        "director": {
+          "$ref": "#/definitions/codebuddyModelId"
+        },
+        "goal_evaluator": {
+          "$ref": "#/definitions/codebuddyModelId"
+        },
+        "recorder": {
+          "$ref": "#/definitions/codebuddyModelId"
+        },
+        "reviewer": {
+          "$ref": "#/definitions/codebuddyModelId"
+        },
+        "reviewer_b": {
+          "$ref": "#/definitions/codebuddyModelId"
+        },
+        "tester": {
+          "$ref": "#/definitions/codebuddyModelId"
+        }
+      },
+      "required": [
+        "architect",
+        "coder_lite",
+        "coder_standard",
+        "coder_senior",
+        "reviewer",
+        "reviewer_b",
+        "tester",
+        "recorder",
+        "director",
+        "goal_evaluator"
+      ],
+      "type": "object"
+    },
+    "model": {
+      "additionalProperties": false,
+      "properties": {
+        "cost": {
+          "pattern": "^x[0-9]+(\\.[0-9]+)?$",
+          "type": "string"
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "platform": {
+          "items": {
+            "enum": [
+              "codebuddy",
+              "opencode"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "recommended_for": {
+          "items": {
+            "enum": [
+              "architect",
+              "coder_lite",
+              "coder_standard",
+              "coder_senior",
+              "reviewer",
+              "reviewer_b",
+              "tester",
+              "recorder",
+              "director",
+              "goal_evaluator"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tags": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tier": {
+          "enum": [
+            "top",
+            "mid",
+            "light",
+            "budget",
+            "free"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "tier",
+        "cost",
+        "tags",
+        "platform"
+      ],
+      "type": "object"
+    },
+    "opencodeModelId": {
+      "minLength": 1,
+      "pattern": "^[a-z0-9-]+/[a-z0-9][a-z0-9.-]*$",
+      "type": "string"
+    },
+    "opencodePresets": {
+      "additionalProperties": false,
+      "properties": {
+        "presets": {
+          "additionalProperties": false,
+          "properties": {
+            "balanced": {
+              "$ref": "#/definitions/opencodeRoleMap"
+            },
+            "economic": {
+              "$ref": "#/definitions/opencodeRoleMap"
+            },
+            "quality": {
+              "$ref": "#/definitions/opencodeRoleMap"
+            }
+          },
+          "required": [
+            "economic",
+            "balanced",
+            "quality"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "presets"
+      ],
+      "type": "object"
+    },
+    "opencodeRoleMap": {
+      "additionalProperties": false,
+      "description": "model_role → OpenCode provider/model ID（须覆盖全部 10 个角色键）",
+      "properties": {
+        "architect": {
+          "$ref": "#/definitions/opencodeModelId"
+        },
+        "coder_lite": {
+          "$ref": "#/definitions/opencodeModelId"
+        },
+        "coder_senior": {
+          "$ref": "#/definitions/opencodeModelId"
+        },
+        "coder_standard": {
+          "$ref": "#/definitions/opencodeModelId"
+        },
+        "director": {
+          "$ref": "#/definitions/opencodeModelId"
+        },
+        "goal_evaluator": {
+          "$ref": "#/definitions/opencodeModelId"
+        },
+        "recorder": {
+          "$ref": "#/definitions/opencodeModelId"
+        },
+        "reviewer": {
+          "$ref": "#/definitions/opencodeModelId"
+        },
+        "reviewer_b": {
+          "$ref": "#/definitions/opencodeModelId"
+        },
+        "tester": {
+          "$ref": "#/definitions/opencodeModelId"
+        }
+      },
+      "required": [
+        "architect",
+        "coder_lite",
+        "coder_standard",
+        "coder_senior",
+        "reviewer",
+        "reviewer_b",
+        "tester",
+        "recorder",
+        "director",
+        "goal_evaluator"
+      ],
+      "type": "object"
+    },
+    "vendorGroups": {
+      "additionalProperties": {
+        "items": {
+          "$ref": "#/definitions/model"
+        },
+        "type": "array"
+      },
+      "description": "按厂商分组的模型条目（paid 常用组：claude/gemini/gpt/kimi/glm/minimax/deepseek）",
+      "type": "object"
+    }
+  },
+  "description": "budget-models.json 结构描述：模型目录与双平台（CodeBuddy/OpenCode）三档预设（design.md §7）",
+  "properties": {
+    "_meta": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "unconfirmed_note": {
+          "type": "string"
+        },
+        "unconfirmed_opencode_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "update_command": {
+          "const": "budget setup models",
+          "type": "string"
+        },
+        "updated_at": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "description",
+        "updated_at",
+        "update_command"
+      ],
+      "type": "object"
+    },
+    "aliases": {
+      "additionalProperties": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "description": "简写 → 标准 model id 映射（budget setup agent custom 别名解析）",
+      "type": "object"
+    },
+    "models": {
+      "additionalProperties": false,
+      "properties": {
+        "free": {
+          "$ref": "#/definitions/vendorGroups"
+        },
+        "paid": {
+          "$ref": "#/definitions/vendorGroups"
+        }
+      },
+      "required": [
+        "paid",
+        "free"
+      ],
+      "type": "object"
+    },
+    "platforms": {
+      "additionalProperties": false,
+      "properties": {
+        "codebuddy": {
+          "$ref": "#/definitions/codebuddyPresets"
+        },
+        "opencode": {
+          "$ref": "#/definitions/opencodePresets"
+        }
+      },
+      "required": [
+        "codebuddy",
+        "opencode"
+      ],
+      "type": "object"
+    },
+    "provider_map": {
+      "additionalProperties": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "description": "厂商组名 → opencode provider 前缀映射（budget setup agent custom 别名解析数据支撑；键须覆盖 models.paid/free 全部组名，本项目数据必含，optional 以兼容用户旧配置）",
+      "propertyNames": {
+        "enum": [
+          "claude",
+          "deepseek",
+          "gemini",
+          "glm",
+          "gpt",
+          "hunyuan",
+          "kimi",
+          "minimax",
+          "opencode"
+        ]
+      },
+      "type": "object"
+    },
+    "roles": {
+      "description": "与 agent 清单一致的 10 个 model_role 键",
+      "items": {
+        "enum": [
+          "architect",
+          "coder_lite",
+          "coder_standard",
+          "coder_senior",
+          "reviewer",
+          "reviewer_b",
+          "tester",
+          "recorder",
+          "director",
+          "goal_evaluator"
+        ],
+        "type": "string"
+      },
+      "maxItems": 10,
+      "minItems": 10,
+      "type": "array",
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "_meta",
+    "aliases",
+    "roles",
+    "models",
+    "platforms"
+  ],
+  "title": "BudgetBuddy Models Configuration Schema",
+  "type": "object"
+}

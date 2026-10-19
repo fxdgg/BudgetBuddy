@@ -1,0 +1,43 @@
+# OpenCode 平台映射 DSL（design.md §3.5，build.py 为唯一消费者）。
+platform: opencode
+output: dist/opencode
+routing:
+  agent:   "agent/{name}.md"
+  command: "command/{group}-{name}.md"        # budget-start.md、opsx-apply.md
+  skill:   "skill/{skill}/"                   # 单数目录名
+  rule:    "AGENTS.fragment.md"               # 全部 rule 合并单文件
+  hook:    ""                                 # 无 hooks 机制，不分发
+  models:  "budget-models.json"
+  personas: "personas.json"
+  lib:     "lib/"
+  setup:   "setup.sh"
+  docs:
+    MODEL_SELECTION.template.md: "docs/MODEL_SELECTION.md"   # 经 A6 渲染管线输出
+    PERSONAS.md: "docs/PERSONAS.md"
+    architecture.md: "docs/architecture.md"
+    opencode-setup-notes.md: "docs/setup-notes.md"
+agent_frontmatter:
+  emit:
+    description: "{description}"
+    mode: "subagent"
+    model: "{resolved_model}"
+    permission: "{permission_map}"
+    max_turns: "{max_turns}"
+  drop: [name, model_role, permissions, tools]
+command_frontmatter:
+  emit: [description]                         # 命令名由产物文件名承载
+  drop: [name, argument-hint]
+command:
+  invoke: "/{group}-{name}"
+body_variables:
+  TASK_TOOL: "task"
+  SKILL_NS: ""
+  AGENT_DIR: "~/.config/opencode/agent/（全局；项目级 .opencode/agent/ 覆盖）"
+  GUARD_PATH: "$HOME/.budgetbuddy/projects/<project-name>/memory/coder-guard.json"
+  RULES_DIR: "AGENTS.md 标记区块（安装器合并）"
+  PROJECT_DOC: "启动时读取项目根目录 AGENTS.md（如保留 CODEBUDDY.md，一并参考）"
+extra_outputs:
+  - kind: agents_fragment
+    source: "rules/**"
+    dest: "AGENTS.fragment.md"
+    markers: ["<!-- BudgetBuddy:begin -->", "<!-- BudgetBuddy:end -->"]

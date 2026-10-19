@@ -1,0 +1,16 @@
+# IDE
+.idea/
+
+# 会话级 agent 模型适配（环境专属工具，非产品内容）
+.codebuddy/agents/
+
+# BudgetBuddy 运行时数据
+.budget/
+
+# 构建产物中的临时文件
+*.pyc
+__pycache__/
+
+# release 打包产物（由发布流程上传托管方，不提交 git）
+budgetbuddy-*.zip
+budgetbuddy-*.zip.sha256

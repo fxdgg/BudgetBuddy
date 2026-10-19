@@ -1,0 +1,40 @@
+# CodeBuddy 平台映射 DSL（design.md §3.5，build.py 为唯一消费者）。
+platform: codebuddy
+output: dist/codebuddy
+routing:
+  agent:   "agents/{name}.md"
+  command: "commands/{group}/{name}.md"      # budget | opsx
+  skill:   "skills/{skill}/"
+  rule:    "rules/budget-{name}.mdc"
+  hook:    "hooks/budget-notify-hook.py"
+  models:  "budget-models.json"
+  personas: "personas.json"
+  lib:     "lib/"
+  setup:   "setup.sh"
+  docs:                                      # 显式映射：源文件 → 目标路径；null = 不分发
+    MODEL_SELECTION.template.md: "docs/MODEL_SELECTION.md"   # 经 A6 渲染管线输出
+    PERSONAS.md: "docs/PERSONAS.md"
+    architecture.md: "docs/architecture.md"
+    opencode-setup-notes.md: null            # opencode 专属说明，本平台不分发
+agent_frontmatter:
+  emit:
+    name: "{name}"
+    description: "{description}"
+    model: "{resolved_model}"
+    tools: "{tools|pascal}"
+    permissionMode: "{permission_mode}"
+    max_turns: "{max_turns}"
+  permission_mode_rule: { edit_all: "acceptEdits", edit_restricted: "plan" }
+  drop: [model_role, permissions]
+command_frontmatter:
+  emit: [name, description, argument-hint]   # 三字段直出
+  drop: []
+command:
+  invoke: "/{group}:{name}"                  # /budget:start、/opsx:apply
+body_variables:
+  TASK_TOOL: "Agent"
+  SKILL_NS: "superpowers:"
+  AGENT_DIR: ".codebuddy/agents/（项目级；不存在则 $HOME/.codebuddy/agents/）"
+  GUARD_PATH: "$HOME/.budgetbuddy/projects/<project-name>/memory/coder-guard.json"
+  RULES_DIR: ".codebuddy/rules/（不存在则 $HOME/.codebuddy/rules/）"
+  PROJECT_DOC: ""

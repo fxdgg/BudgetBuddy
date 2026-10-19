@@ -28,12 +28,10 @@ BudgetBuddy 是一套多 Agent 省钱研发工作流。它把每个任务路由�
 ### 在线安装（一行命令）
 
 ```bash
-# BUDGET_REPO_URL 须指向托管 install.sh 与 releases 的基础 URL
-export BUDGET_REPO_URL="<仓库基础地址>"
-curl -fsSL $BUDGET_REPO_URL/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/fxdgg/BudgetBuddy/main/install.sh | bash
 ```
 
-> ⚠️ **信任边界**：`curl | bash` 会以你的权限执行远端脚本。建议先审查脚本（`curl -fsSL $BUDGET_REPO_URL/install.sh | less`）再执行。安装器下载 release zip 后**强制 SHA256 校验**——校验失败即中止，绝不安装损坏的包。
+> ⚠️ **信任边界**：`curl | bash` 会以你的权限执行远端脚本。建议先审查脚本（`curl -fsSL https://raw.githubusercontent.com/fxdgg/BudgetBuddy/main/install.sh | less`）再执行。安装器下载 release zip 后**强制 SHA256 校验**——校验失败即中止，绝不安装损坏的包。
 
 交互模式会询问平台（CodeBuddy / OpenCode / 两者）与作用域（项目 / 全局）。非交互：
 

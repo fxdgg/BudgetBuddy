@@ -28,12 +28,10 @@ The kit is self-bootstrapped: this repository is developed with BudgetBuddy's ow
 ### Online install (one line)
 
 ```bash
-# BUDGET_REPO_URL must point to the base URL that hosts install.sh and releases
-export BUDGET_REPO_URL="<repo-base-url>"
-curl -fsSL $BUDGET_REPO_URL/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/fxdgg/BudgetBuddy/main/install.sh | bash
 ```
 
-> ⚠️ **Trust boundary**: `curl | bash` executes a remote script with your privileges. Review the script first (`curl -fsSL $BUDGET_REPO_URL/install.sh | less`) before piping it to bash. The installer downloads the release zip and **enforces SHA256 verification** — it aborts on checksum mismatch and never installs a corrupted package.
+> ⚠️ **Trust boundary**: `curl | bash` executes a remote script with your privileges. Review the script first (`curl -fsSL https://raw.githubusercontent.com/fxdgg/BudgetBuddy/main/install.sh | less`) before piping it to bash. The installer downloads the release zip and **enforces SHA256 verification** — it aborts on checksum mismatch and never installs a corrupted package.
 
 Interactive mode asks for platform (CodeBuddy / OpenCode / both) and scope (project / global). Non-interactive:
 

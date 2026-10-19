@@ -148,31 +148,59 @@ if rows:
     for name, model, role in rows:
         print('  %-16s %-28s %s' % (name, model, role))
     print('共 %d 个 agent。' % len(rows))
-# 外部自定义模型（来自 CodeBuddy 客户端配置：方舟/Presence/讯飞/doubao 等）
+# 外部自定义模型（来自 CodeBuddy 客户端配置与 BUDGET_EXTERNAL_MODELS 补充来源）
+def _load_models_json(_p):
+    """读取 models[] 格式 JSON；容忍 JSONC 注释（// 与 /* */）。"""
+    try:
+        _raw = open(_p, encoding='utf-8').read()
+    except OSError:
+        return None
+    try:
+        return json.loads(_raw)
+    except ValueError:
+        import re
+        _c = re.sub(r'/\*.*?\*/', '', _raw, flags=re.S)
+        _c = re.sub(r'(?m)(?<![:"])//.*$', '', _c)
+        try:
+            return json.loads(_c)
+        except ValueError:
+            return None
+
 _bm = data.get('models', {})
 budget_ids = {e.get('id', '').lower() for sec in ('paid', 'free')
               for v, es in _bm.get(sec, {}).items() for e in es}
 _ext_paths = [os.path.expanduser('~/.codebuddy/models.json'),
               os.path.join(os.getcwd(), '.codebuddy/models.json')]
+# BUDGET_EXTERNAL_MODELS：指向任意 models[] 格式 JSON 文件或目录（: 分隔，支持 ~ 展开）
+_env = os.environ.get('BUDGET_EXTERNAL_MODELS', '')
+for _ep in _env.split(':'):
+    _ep = _ep.strip()
+    if not _ep:
+        continue
+    _ep = os.path.expanduser(_ep)
+    if os.path.isdir(_ep):
+        for _fn in sorted(os.listdir(_ep)):
+            if _fn.endswith('.json'):
+                _ext_paths.append(os.path.join(_ep, _fn))
+    elif os.path.isfile(_ep):
+        _ext_paths.append(_ep)
 _ext = []
 _ext_seen = set()
 for _ep in _ext_paths:
-    if os.path.isfile(_ep):
-        try:
-            _ed = json.load(open(_ep, encoding='utf-8'))
-        except (OSError, ValueError):
+    _ed = _load_models_json(_ep)
+    if not isinstance(_ed, dict):
+        continue
+    for _m in _ed.get('models', []):
+        if not isinstance(_m, dict):
             continue
-        for _m in _ed.get('models', []):
-            if not isinstance(_m, dict):
-                continue
-            _mid = _m.get('id')
-            if not _mid or _mid.lower() in _ext_seen or _mid.lower() in budget_ids:
-                continue
-            _ext_seen.add(_mid.lower())
-            _ext.append((_mid, _m.get('vendor', '-'), _m.get('name', _mid)))
+        _mid = _m.get('id')
+        if not _mid or _mid.lower() in _ext_seen or _mid.lower() in budget_ids:
+            continue
+        _ext_seen.add(_mid.lower())
+        _ext.append((_mid, _m.get('vendor', '-'), _m.get('name', _mid)))
 if _ext:
     print('')
-    print('外部自定义模型 · CodeBuddy（来自客户端 models.json）:')
+    print('外部自定义模型 · CodeBuddy（~/.codebuddy/models.json 与 BUDGET_EXTERNAL_MODELS）:')
     _by_v = {}
     for _mid, _v, _n in _ext:
         _by_v.setdefault(_v, []).append(_mid)
@@ -266,30 +294,58 @@ for platform in sorted(platforms):
 print('更新于: %s' % meta.get('updated_at', '-'))
 print('更新命令: %s' % meta.get('update_command', '-'))
 
-# 外部自定义模型（来自 CodeBuddy 客户端配置）
+# 外部自定义模型（来自 CodeBuddy 客户端配置与 BUDGET_EXTERNAL_MODELS 补充来源）
+def _load_models_json(_p):
+    """读取 models[] 格式 JSON；容忍 JSONC 注释（// 与 /* */）。"""
+    try:
+        _raw = open(_p, encoding='utf-8').read()
+    except OSError:
+        return None
+    try:
+        return json.loads(_raw)
+    except ValueError:
+        import re
+        _c = re.sub(r'/\*.*?\*/', '', _raw, flags=re.S)
+        _c = re.sub(r'(?m)(?<![:"])//.*$', '', _c)
+        try:
+            return json.loads(_c)
+        except ValueError:
+            return None
+
 _bm = data.get('models', {})
 budget_ids = {e.get('id', '').lower() for sec in ('paid', 'free')
               for v, es in _bm.get(sec, {}).items() for e in es}
 _ext_paths = [os.path.expanduser('~/.codebuddy/models.json'),
               os.path.join(os.getcwd(), '.codebuddy/models.json')]
+# BUDGET_EXTERNAL_MODELS：指向任意 models[] 格式 JSON 文件或目录（: 分隔，支持 ~ 展开）
+_env = os.environ.get('BUDGET_EXTERNAL_MODELS', '')
+for _ep in _env.split(':'):
+    _ep = _ep.strip()
+    if not _ep:
+        continue
+    _ep = os.path.expanduser(_ep)
+    if os.path.isdir(_ep):
+        for _fn in sorted(os.listdir(_ep)):
+            if _fn.endswith('.json'):
+                _ext_paths.append(os.path.join(_ep, _fn))
+    elif os.path.isfile(_ep):
+        _ext_paths.append(_ep)
 _ext = []
 _ext_seen = set()
 for _ep in _ext_paths:
-    if os.path.isfile(_ep):
-        try:
-            _ed = json.load(open(_ep, encoding='utf-8'))
-        except (OSError, ValueError):
+    _ed = _load_models_json(_ep)
+    if not isinstance(_ed, dict):
+        continue
+    for _m in _ed.get('models', []):
+        if not isinstance(_m, dict):
             continue
-        for _m in _ed.get('models', []):
-            if not isinstance(_m, dict):
-                continue
-            _mid = _m.get('id')
-            if not _mid or _mid.lower() in _ext_seen or _mid.lower() in budget_ids:
-                continue
-            _ext_seen.add(_mid.lower())
-            _ext.append((_mid, _m.get('vendor', '-'), _m.get('name', _mid)))
+        _mid = _m.get('id')
+        if not _mid or _mid.lower() in _ext_seen or _mid.lower() in budget_ids:
+            continue
+        _ext_seen.add(_mid.lower())
+        _ext.append((_mid, _m.get('vendor', '-'), _m.get('name', _mid)))
 if _ext:
-    print('外部自定义模型 · CodeBuddy（来自客户端 models.json）:')
+    print('外部自定义模型 · CodeBuddy（~/.codebuddy/models.json 与 BUDGET_EXTERNAL_MODELS）:')
     _by_v = {}
     for _mid, _v, _n in _ext:
         _by_v.setdefault(_v, []).append(_mid)

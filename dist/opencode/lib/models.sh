@@ -93,30 +93,58 @@ print('预设切换: budget setup agent preset <economic|balanced|quality>')
 print('预设明细: budget setup agent preset（无参数列出）')
 print('统一覆写: budget setup agent custom <model>（支持别名/第三方模型 ID）')
 
-# 外部自定义模型（来自 CodeBuddy 客户端配置：方舟/Presence/讯飞/doubao 等）
+# 外部自定义模型（来自 CodeBuddy 客户端配置与 BUDGET_EXTERNAL_MODELS 补充来源）
+def _load_models_json(_p):
+    """读取 models[] 格式 JSON；容忍 JSONC 注释（// 与 /* */）。"""
+    try:
+        _raw = open(_p, encoding='utf-8').read()
+    except OSError:
+        return None
+    try:
+        return json.loads(_raw)
+    except ValueError:
+        import re
+        _c = re.sub(r'/\*.*?\*/', '', _raw, flags=re.S)
+        _c = re.sub(r'(?m)(?<![:"])//.*$', '', _c)
+        try:
+            return json.loads(_c)
+        except ValueError:
+            return None
+
 budget_ids = {e.get('id', '').lower() for sec in ('paid', 'free')
               for v, es in data.get('models', {}).get(sec, {}).items() for e in es}
 ext_paths = [os.path.expanduser('~/.codebuddy/models.json'),
              os.path.join(os.getcwd(), '.codebuddy/models.json')]
+# BUDGET_EXTERNAL_MODELS：指向任意 models[] 格式 JSON 文件或目录（: 分隔，支持 ~ 展开）
+_env = os.environ.get('BUDGET_EXTERNAL_MODELS', '')
+for _ep in _env.split(':'):
+    _ep = _ep.strip()
+    if not _ep:
+        continue
+    _ep = os.path.expanduser(_ep)
+    if os.path.isdir(_ep):
+        for _fn in sorted(os.listdir(_ep)):
+            if _fn.endswith('.json'):
+                ext_paths.append(os.path.join(_ep, _fn))
+    elif os.path.isfile(_ep):
+        ext_paths.append(_ep)
 ext_models = []
 ext_seen = set()
 for ep in ext_paths:
-    if os.path.isfile(ep):
-        try:
-            ed = json.load(open(ep, encoding='utf-8'))
-        except (OSError, ValueError):
+    ed = _load_models_json(ep)
+    if not isinstance(ed, dict):
+        continue
+    for m in ed.get('models', []):
+        if not isinstance(m, dict):
             continue
-        for m in ed.get('models', []):
-            if not isinstance(m, dict):
-                continue
-            mid = m.get('id')
-            if not mid or mid.lower() in ext_seen or mid.lower() in budget_ids:
-                continue
-            ext_seen.add(mid.lower())
-            ext_models.append((mid, m.get('vendor', '-'), m.get('name', mid)))
+        mid = m.get('id')
+        if not mid or mid.lower() in ext_seen or mid.lower() in budget_ids:
+            continue
+        ext_seen.add(mid.lower())
+        ext_models.append((mid, m.get('vendor', '-'), m.get('name', mid)))
 print('')
 if ext_models:
-    print('外部自定义模型 · CodeBuddy（来自客户端 models.json，可直接 budget setup agent custom <id> 使用）:')
+    print('外部自定义模型 · CodeBuddy（~/.codebuddy/models.json 与 BUDGET_EXTERNAL_MODELS，可直接 budget setup agent custom <id> 使用）:')
     by_v = {}
     for mid, vendor, name in ext_models:
         by_v.setdefault(vendor, []).append(mid)

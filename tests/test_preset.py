@@ -508,12 +508,26 @@ class AgentCommandCodebuddyTests(SandboxTestCase):
         for agent in LOCKED_AGENTS:
             self.assertEqual(read_model_field(self.agents / (agent + '.md')), 'glm-5.2')
 
-    def test_custom_unknown_model_errors_with_aliases(self):
-        proc = self._run('custom no-such-model')
-        self.assertEqual(proc.returncode, 1)
+    def test_custom_third_party_model_accepted(self):
+        """custom 接受第三方模型 ID（方舟/Presence 等），原样写入 frontmatter。"""
+        proc = self._run('custom presence-glm/glm-5.3')
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         combined = proc.stdout + proc.stderr
-        self.assertIn('未知模型名: no-such-model', combined)
-        self.assertIn('可用别名', combined)
+        self.assertNotIn('未知模型名', combined)
+        for agent in LOCKED_AGENTS:
+            self.assertEqual(read_model_field(self.agents / (agent + '.md')),
+                             'presence-glm/glm-5.3',
+                             'agent %s 未覆写为第三方模型' % agent)
+
+    def test_custom_alias_still_resolved(self):
+        """custom 仍正常解析已知别名（如 kimi → kimi-k2.7）。"""
+        proc = self._run('custom kimi')
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        combined = proc.stdout + proc.stderr
+        self.assertNotIn('未知模型名', combined)
+        for agent in LOCKED_AGENTS:
+            self.assertEqual(read_model_field(self.agents / (agent + '.md')),
+                             'kimi-k2.7', 'agent %s 别名未解析' % agent)
 
     def test_custom_missing_argument_errors(self):
         proc = self._run('custom')

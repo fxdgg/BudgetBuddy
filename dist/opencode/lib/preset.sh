@@ -121,9 +121,10 @@ setup_agent_custom() {
         return 1
     fi
 
-    # 别名/ID 解析（平台感知：opencode 经 provider_map 输出 provider/model 形态）
+    # 别名/ID 解析（平台感知：opencode 经 provider_map 输出 provider/model 形态；
+    # --custom 信任用户已配置的第三方模型，方舟/Presence/讯飞/doubao 等原样返回）
     local resolved rc=0
-    resolved=$(_budget_resolver resolve --input "$input" --platform "$BUDGET_PLATFORM_KIND" 2>&1) || rc=$?
+    resolved=$(_budget_resolver resolve --input "$input" --platform "$BUDGET_PLATFORM_KIND" --custom 2>&1) || rc=$?
     if [[ "$rc" -ne 0 ]]; then
         budget_print_error "模型解析失败:"
         echo "$resolved" >&2

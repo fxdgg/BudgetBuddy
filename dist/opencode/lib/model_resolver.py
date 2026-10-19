@@ -75,12 +75,18 @@ def _unknown_input_message(name: str, aliases: dict) -> str:
     return f'未知模型名: {name}（不在别名表与模型目录中）\n可用别名: {available}'
 
 
-def resolve_model(name: str, platform: str, data: dict) -> tuple[str | None, str | None]:
+def resolve_model(name: str, platform: str, data: dict,
+                   custom: bool = False) -> tuple[str | None, str | None]:
     """解析输入为平台最终 model 值。
 
-    codebuddy：别名/裸 ID → 裸 ID；provider/model 形态取 model 部分。
+    codebuddy：别名/裸 ID → 裸 ID；provider/model 形态原样保留（第三方模型
+        如 presence-glm/glm-5.3、方舟 volcengine 接入等，信任用户，不剥离）。
     opencode：别名/裸 ID → 经 provider_map 转换为 provider/model；
-    provider/model 形态直接使用。
+        provider/model 形态直接使用。
+
+    custom=True 时：未知输入（不在别名表与预算目录）原样返回，支持用户已
+        在 CodeBuddy 客户端配置的第三方模型（方舟/Presence/讯飞/doubao 等）
+        直接经 budget setup agent custom <id> 分配。
 
     返回 (value, error)：成功时 error 为 None；失败时 value 为 None。
     """
@@ -95,12 +101,22 @@ def resolve_model(name: str, platform: str, data: dict) -> tuple[str | None, str
     bare = alias_lower.get(text.lower())
     if bare is None:
         bare = id_lower.get(text.lower())
-    if bare is None and '/' not in text:
-        return None, _unknown_input_message(text, aliases)
+    if bare is None:
+        if custom:
+            # 信任用户提供的第三方模型 ID（方舟/Presence/讯飞/doubao 等），原样返回
+            return text, None
+        if '/' not in text:
+            return None, _unknown_input_message(text, aliases)
 
     if platform == 'opencode':
         if '/' in text:
             return text, None
+        if bare is None:
+            if custom:
+                return text, None
+            return None, (
+                f'模型 {text} 不在目录中，无法确定 opencode provider'
+                '（目录可能过期，可运行 budget setup models 更新）')
         vendor = catalog.get(bare)
         if vendor is None:
             return None, (
@@ -111,9 +127,14 @@ def resolve_model(name: str, platform: str, data: dict) -> tuple[str | None, str
             return None, f'厂商组 {vendor} 缺少 provider_map 映射（budget-models.json 数据异常）'
         return f'{provider}/{bare}', None
 
-    # codebuddy：provider/model 形态取 model 部分，其余直接使用裸 ID
+    # codebuddy：provider/model 形态——若裸 ID 已在预算目录/别名中则剥离为裸 ID
+    # （如 zhipu/glm-5.2 → glm-5.2），否则视为第三方接入模型（方舟/Presence/讯飞等）
+    # 原样保留（如 presence-glm/glm-5.3 → presence-glm/glm-5.3，信任用户配置）
     if '/' in text:
-        return text.rsplit('/', 1)[1], None
+        bare_part = text.rsplit('/', 1)[1]
+        if bare_part in id_lower or bare_part in alias_lower:
+            return bare_part, None
+        return text, None
     return bare, None
 
 
@@ -334,6 +355,8 @@ def main() -> None:
     p_resolve = sub.add_parser('resolve', help='解析别名/ID → 平台最终 model 值')
     p_resolve.add_argument('--input', required=True, help='输入（别名/裸 ID/provider-model）')
     p_resolve.add_argument('--platform', required=True, choices=('codebuddy', 'opencode'))
+    p_resolve.add_argument('--custom', action='store_true',
+                           help='自定义覆写模式：未知模型 ID 原样返回（支持第三方模型）')
 
     p_preset = sub.add_parser('preset', help='预设档位查询（agent=模型 行）')
     p_preset.add_argument('--name', required=True, help='预设名')
@@ -357,7 +380,8 @@ def main() -> None:
     data = load_json(args.models)
 
     if args.action == 'resolve':
-        value, error = resolve_model(args.input, args.platform, data)
+        value, error = resolve_model(args.input, args.platform, data,
+                                     custom=getattr(args, 'custom', False))
         if error:
             print(f'error: {error}', file=sys.stderr)
             sys.exit(2)

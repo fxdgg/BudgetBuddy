@@ -148,6 +148,38 @@ if rows:
     for name, model, role in rows:
         print('  %-16s %-28s %s' % (name, model, role))
     print('共 %d 个 agent。' % len(rows))
+# 外部自定义模型（来自 CodeBuddy 客户端配置：方舟/Presence/讯飞/doubao 等）
+_bm = data.get('models', {})
+budget_ids = {e.get('id', '').lower() for sec in ('paid', 'free')
+              for v, es in _bm.get(sec, {}).items() for e in es}
+_ext_paths = [os.path.expanduser('~/.codebuddy/models.json'),
+              os.path.join(os.getcwd(), '.codebuddy/models.json')]
+_ext = []
+_ext_seen = set()
+for _ep in _ext_paths:
+    if os.path.isfile(_ep):
+        try:
+            _ed = json.load(open(_ep, encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        for _m in _ed.get('models', []):
+            if not isinstance(_m, dict):
+                continue
+            _mid = _m.get('id')
+            if not _mid or _mid.lower() in _ext_seen or _mid.lower() in budget_ids:
+                continue
+            _ext_seen.add(_mid.lower())
+            _ext.append((_mid, _m.get('vendor', '-'), _m.get('name', _mid)))
+if _ext:
+    print('')
+    print('外部自定义模型（来自 CodeBuddy 客户端配置）:')
+    _by_v = {}
+    for _mid, _v, _n in _ext:
+        _by_v.setdefault(_v, []).append(_mid)
+    for _v in sorted(_by_v):
+        print('  [%s] %s' % (_v, ', '.join(_by_v[_v])))
+    print('  → 可分配: budget setup agent custom <id>')
+
 if models_meta:
     print('模型目录更新于 %s（更新命令: %s）' % (
         models_meta.get('updated_at', '-'),
@@ -193,6 +225,36 @@ for platform in sorted(platforms):
     print('预设: %s × %s（%d 角色/档）' % (platform, preset_names, role_count))
 print('更新于: %s' % meta.get('updated_at', '-'))
 print('更新命令: %s' % meta.get('update_command', '-'))
+
+# 外部自定义模型（来自 CodeBuddy 客户端配置）
+_bm = data.get('models', {})
+budget_ids = {e.get('id', '').lower() for sec in ('paid', 'free')
+              for v, es in _bm.get(sec, {}).items() for e in es}
+_ext_paths = [os.path.expanduser('~/.codebuddy/models.json'),
+              os.path.join(os.getcwd(), '.codebuddy/models.json')]
+_ext = []
+_ext_seen = set()
+for _ep in _ext_paths:
+    if os.path.isfile(_ep):
+        try:
+            _ed = json.load(open(_ep, encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        for _m in _ed.get('models', []):
+            if not isinstance(_m, dict):
+                continue
+            _mid = _m.get('id')
+            if not _mid or _mid.lower() in _ext_seen or _mid.lower() in budget_ids:
+                continue
+            _ext_seen.add(_mid.lower())
+            _ext.append((_mid, _m.get('vendor', '-'), _m.get('name', _mid)))
+if _ext:
+    print('外部自定义模型（来自 CodeBuddy 客户端配置，可直接 budget setup agent custom <id> 使用）:')
+    _by_v = {}
+    for _mid, _v, _n in _ext:
+        _by_v.setdefault(_v, []).append(_mid)
+    for _v in sorted(_by_v):
+        print('  [%s] %s' % (_v, ', '.join(_by_v[_v])))
 PYEOF
 }
 

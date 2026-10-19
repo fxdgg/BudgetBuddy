@@ -172,13 +172,53 @@ for _ep in _ext_paths:
             _ext.append((_mid, _m.get('vendor', '-'), _m.get('name', _mid)))
 if _ext:
     print('')
-    print('外部自定义模型（来自 CodeBuddy 客户端配置）:')
+    print('外部自定义模型 · CodeBuddy（来自客户端 models.json）:')
     _by_v = {}
     for _mid, _v, _n in _ext:
         _by_v.setdefault(_v, []).append(_mid)
     for _v in sorted(_by_v):
         print('  [%s] %s' % (_v, ', '.join(_by_v[_v])))
     print('  → 可分配: budget setup agent custom <id>')
+
+# 外部自定义模型 · opencode（~/.config/opencode/opencode.jsonc|json 的 provider.<name>.models）
+import re as _ore
+def _oload(_p):
+    try:
+        _raw = open(_p, encoding='utf-8').read()
+    except OSError:
+        return None
+    _raw = _ore.sub(r'/\*.*?\*/', '', _raw, flags=_ore.S)
+    _raw = _ore.sub(r'(?m)(?<![:"])//.*$', '', _raw)
+    try:
+        return json.loads(_raw)
+    except ValueError:
+        return None
+
+_oc = []
+_oc_seen = set()
+for _ocp in [os.path.expanduser('~/.config/opencode/opencode.jsonc'),
+             os.path.expanduser('~/.config/opencode/opencode.json'),
+             os.path.join(os.getcwd(), 'opencode.jsonc'),
+             os.path.join(os.getcwd(), 'opencode.json')]:
+    _ocd = _oload(_ocp)
+    if isinstance(_ocd, dict):
+        for _prov, _pcfg in (_ocd.get('provider') or {}).items():
+            if not isinstance(_pcfg, dict):
+                continue
+            for _mid in (_pcfg.get('models') or {}):
+                _ref = '%s/%s' % (_prov, _mid)
+                if _ref.lower() not in _oc_seen:
+                    _oc_seen.add(_ref.lower())
+                    _oc.append((_prov, _ref))
+if _oc:
+    print('')
+    print('外部自定义模型 · opencode（来自 ~/.config/opencode/opencode.jsonc）:')
+    _by_p = {}
+    for _prov, _ref in _oc:
+        _by_p.setdefault(_prov, []).append(_ref)
+    for _prov in sorted(_by_p):
+        print('  [%s] %s' % (_prov, ', '.join(sorted(_by_p[_prov]))))
+    print('  → opencode 可分配: budget setup agent custom <provider/model>')
 
 if models_meta:
     print('模型目录更新于 %s（更新命令: %s）' % (
@@ -249,12 +289,52 @@ for _ep in _ext_paths:
             _ext_seen.add(_mid.lower())
             _ext.append((_mid, _m.get('vendor', '-'), _m.get('name', _mid)))
 if _ext:
-    print('外部自定义模型（来自 CodeBuddy 客户端配置，可直接 budget setup agent custom <id> 使用）:')
+    print('外部自定义模型 · CodeBuddy（来自客户端 models.json）:')
     _by_v = {}
     for _mid, _v, _n in _ext:
         _by_v.setdefault(_v, []).append(_mid)
     for _v in sorted(_by_v):
         print('  [%s] %s' % (_v, ', '.join(_by_v[_v])))
+
+# 外部自定义模型 · opencode（~/.config/opencode/opencode.jsonc|json 的 provider.<name>.models）
+import re as _ore
+def _oload(_p):
+    try:
+        _raw = open(_p, encoding='utf-8').read()
+    except OSError:
+        return None
+    _raw = _ore.sub(r'/\*.*?\*/', '', _raw, flags=_ore.S)
+    _raw = _ore.sub(r'(?m)(?<![:"])//.*$', '', _raw)
+    try:
+        return json.loads(_raw)
+    except ValueError:
+        return None
+
+_oc = []
+_oc_seen = set()
+for _ocp in [os.path.expanduser('~/.config/opencode/opencode.jsonc'),
+             os.path.expanduser('~/.config/opencode/opencode.json'),
+             os.path.join(os.getcwd(), 'opencode.jsonc'),
+             os.path.join(os.getcwd(), 'opencode.json')]:
+    _ocd = _oload(_ocp)
+    if isinstance(_ocd, dict):
+        for _prov, _pcfg in (_ocd.get('provider') or {}).items():
+            if not isinstance(_pcfg, dict):
+                continue
+            for _mid in (_pcfg.get('models') or {}):
+                _ref = '%s/%s' % (_prov, _mid)
+                if _ref.lower() not in _oc_seen:
+                    _oc_seen.add(_ref.lower())
+                    _oc.append((_prov, _ref))
+if _oc:
+    print('外部自定义模型 · opencode（来自 ~/.config/opencode/opencode.jsonc）:')
+    _by_p = {}
+    for _prov, _ref in _oc:
+        _by_p.setdefault(_prov, []).append(_ref)
+    for _prov in sorted(_by_p):
+        print('  [%s] %s' % (_prov, ', '.join(sorted(_by_p[_prov]))))
+if not _ext and not _oc:
+    print('外部自定义模型: 无（CodeBuddy / opencode 配置均未检出额外模型）')
 PYEOF
 }
 

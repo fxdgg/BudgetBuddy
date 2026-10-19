@@ -116,13 +116,52 @@ for ep in ext_paths:
             ext_models.append((mid, m.get('vendor', '-'), m.get('name', mid)))
 print('')
 if ext_models:
-    print('外部自定义模型（来自 CodeBuddy 客户端配置，可直接 budget setup agent custom <id> 使用）:')
+    print('外部自定义模型 · CodeBuddy（来自客户端 models.json，可直接 budget setup agent custom <id> 使用）:')
     by_v = {}
     for mid, vendor, name in ext_models:
         by_v.setdefault(vendor, []).append(mid)
     for vendor in sorted(by_v):
         print('  [%s] %s' % (vendor, ', '.join(by_v[vendor])))
-else:
-    print('外部自定义模型: 无（CodeBuddy 客户端 models.json 未检出额外模型）')
+
+# 外部自定义模型 · opencode（~/.config/opencode/opencode.jsonc|json 的 provider.<name>.models）
+import re as _re
+def _load_jsonc(_p):
+    try:
+        _raw = open(_p, encoding='utf-8').read()
+    except OSError:
+        return None
+    _raw = _re.sub(r'/\*.*?\*/', '', _raw, flags=_re.S)
+    _raw = _re.sub(r'(?m)(?<![:"])//.*$', '', _raw)
+    try:
+        return json.loads(_raw)
+    except ValueError:
+        return None
+
+_oc = []
+_oc_seen = set()
+for _ocp in [os.path.expanduser('~/.config/opencode/opencode.jsonc'),
+             os.path.expanduser('~/.config/opencode/opencode.json'),
+             os.path.join(os.getcwd(), 'opencode.jsonc'),
+             os.path.join(os.getcwd(), 'opencode.json')]:
+    _ocd = _load_jsonc(_ocp)
+    if isinstance(_ocd, dict):
+        for _prov, _pcfg in (_ocd.get('provider') or {}).items():
+            if not isinstance(_pcfg, dict):
+                continue
+            for _mid in (_pcfg.get('models') or {}):
+                _ref = '%s/%s' % (_prov, _mid)
+                if _ref.lower() not in _oc_seen:
+                    _oc_seen.add(_ref.lower())
+                    _oc.append((_prov, _ref))
+if _oc:
+    print('')
+    print('外部自定义模型 · opencode（来自 ~/.config/opencode/opencode.jsonc，可直接 budget setup agent custom <provider/model> 使用）:')
+    _by_p = {}
+    for _prov, _ref in _oc:
+        _by_p.setdefault(_prov, []).append(_ref)
+    for _prov in sorted(_by_p):
+        print('  [%s] %s' % (_prov, ', '.join(sorted(_by_p[_prov]))))
+if not ext_models and not _oc:
+    print('外部自定义模型: 无（CodeBuddy / opencode 配置均未检出额外模型）')
 PYEOF
 }

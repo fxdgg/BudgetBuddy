@@ -25,11 +25,17 @@ TBD - created by archiving change foundation. Update Purpose after archive.
 
 ### Requirement: OpenCode 预设 provider/model 格式
 
-`platforms.opencode.presets` 的值为 `provider/model` 格式（anthropic/openai/google/zhipu/deepseek/moonshotai 系）；实现时经本机 `opencode models` 或官方 catalog 核对存在性，无法确认的 ID 在 `_meta` 显式标注「待确认」（design.md §15-Q2，阻塞上线前清零）。【MUST】
+`platforms.opencode.presets` 的值为 `provider/model` 格式（anthropic/openai/google/zhipu/deepseek/moonshotai 系）；实现时经本机 `opencode models` 或官方 catalog 核对存在性，无法确认的 ID 在 `platforms.opencode.unconfirmed_ids` 显式标注「待确认」（旧 `_meta.unconfirmed_opencode_ids` 位置读侧兼容一个版本；读取点含 core/lib/models.sh 与 build.py 渲染），阻塞上线前清零（design.md §15-Q2）。【MUST】
 
 #### Scenario: 待确认标注
+
 - **WHEN** 某预设 ID 未能核对
-- **THEN** budget-models.json `_meta` 中存在对应「待确认」标注，README 不将其宣传为已验证（README 宣传口径为人工审计项，T13 核查）
+- **THEN** budget-models.json `platforms.opencode.unconfirmed_ids` 含该 ID，README 不将其宣传为已验证（README 宣传口径为人工审计项，T13 核查）
+
+#### Scenario: 旧键兼容读取
+
+- **WHEN** 读取仍使用 `_meta.unconfirmed_opencode_ids` 旧位置的 budget-models.json
+- **THEN** 兼容读取生效（渲染与 models.sh 提示不静默丢失），迁移后新位置优先
 
 ### Requirement: 预设切换与角色覆写
 
@@ -50,4 +56,18 @@ TBD - created by archiving change foundation. Update Purpose after archive.
 #### Scenario: 数据驱动
 - **WHEN** budget-models.json 中某模型 cost 修改后重新构建
 - **THEN** 产物 MODEL_SELECTION.md 中该模型条目同步更新，无需手改文档
+
+### Requirement: Claude Code 预设三档梯度
+
+`platforms.claudecode.presets` 三档值为 models.paid.claude 目录完整 ID（复用 catalog 校验策略，不用 sonnet/opus/haiku 别名）：economic → haiku 系（免费/低成本优先）、balanced → sonnet 系（构建期烘焙默认档）、quality → opus 系（质量优先）；未在本机 Claude Code 环境核对的 ID 记入 `platforms.claudecode.unconfirmed_ids`，MODEL_SELECTION.md 渲染「待确认」清单，上线前清零（纪律同 opencode 先例）。【MUST】
+
+#### Scenario: 构建烘焙
+
+- **WHEN** build.py 生成 claudecode 平台 agent 产物
+- **THEN** 每个 agent frontmatter 的 model 为 balanced 预设中其 model_role 对应的 claude 系 ID
+
+#### Scenario: 待确认标注
+
+- **WHEN** 某 claudecode 预设 ID 未能核对
+- **THEN** budget-models.json `platforms.claudecode.unconfirmed_ids` 含该 ID，产物 MODEL_SELECTION.md 渲染对应「待确认」提示
 

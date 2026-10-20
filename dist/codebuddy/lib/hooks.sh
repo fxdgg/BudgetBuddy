@@ -22,7 +22,7 @@
 # 探测规则（对齐 init.sh Step 5/6 落点约定）:
 #   BUDGET_GLOBAL=1 或全局形态 → ~/.codebuddy/settings.json
 #   codebuddy 项目级           → <平台根>/.codebuddy/settings.json
-# 非 codebuddy 形态（OpenCode 无 hooks 机制）→ return 1（stdout 无输出）。
+# 非 codebuddy 形态（opencode/claudecode 无 hooks 机制）→ return 1（stdout 无输出）。
 _budget_hooks_settings_file() {
     detect_platform >/dev/null || true
     if [[ "${BUDGET_PLATFORM_KIND:-unknown}" != "codebuddy" ]]; then
@@ -85,7 +85,7 @@ budget_inject_hooks() {
     local settings_file="${1:-}"
     if [[ -z "$settings_file" ]]; then
         settings_file="$(_budget_hooks_settings_file)" || {
-            budget_print_info "非 codebuddy 形态，跳过 hooks 注入（OpenCode 无 hooks 机制）"
+            budget_print_info "非 codebuddy 形态，跳过 hooks 注入（该平台无 hooks 机制）"
             return 0
         }
     fi

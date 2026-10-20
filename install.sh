@@ -1,5 +1,5 @@
 #!/bin/bash
-# BudgetBuddy install.sh — 双平台安装器（CodeBuddy + OpenCode）
+# BudgetBuddy install.sh — 三平台安装器（CodeBuddy + OpenCode + Claude Code）
 # 依据: design.md §10 / §12-A3/A7/A9/A12 / specs/installer/spec.md
 #
 # 用法:
@@ -10,7 +10,8 @@
 # 环境变量:
 #   BUDGET_REPO_URL   下载源（默认 GitHub raw 占位地址，推送远端后修正）
 #   BUDGET_VERSION    指定版本 tag（默认经 releases/latest 发现最新版）
-#   BUDGET_PLATFORM   平台 codebuddy|opencode|both（跳过平台交互）
+#   BUDGET_PLATFORM   平台 codebuddy|opencode|claudecode|both|all（跳过平台交互；
+#                     all=三平台全部安装【推荐】；both=codebuddy+opencode 历史兼容）
 #   BUDGET_GLOBAL     0=项目 / 1=全局（设置即跳过作用域交互）
 #
 # 安全（specs/installer「下载包完整性校验」/「manifest 增量同步」）:
@@ -26,7 +27,7 @@ BUDGET_REPO_URL="${BUDGET_REPO_URL:-https://github.com/fxdgg/BudgetBuddy}"
 BUDGET_VERSION="${BUDGET_VERSION:-}"
 
 # ─── 全局状态 ──────────────────────────────────────────────────────────────
-BUDGET_INSTALL_PLATFORM="codebuddy"   # codebuddy | opencode | both
+BUDGET_INSTALL_PLATFORM="codebuddy"   # codebuddy | opencode | claudecode | both | all
 BUDGET_INSTALL_GLOBAL=0               # 1=全局
 BUDGET_SCOPE_EXPLICIT=0               # BUDGET_GLOBAL 环境变量已显式设置
 BUDGET_PYTHON="${BUDGET_PYTHON:-}"
@@ -71,14 +72,15 @@ show_help() {
   --help       显示此帮助信息
 
 安装模式:
-  无参数       交互式选择平台（CodeBuddy / OpenCode / 两者）与作用域（项目/全局）
+  无参数       交互式选择平台（CodeBuddy / OpenCode / Claude Code / 全部）与作用域（项目/全局）
   --global     直接全局安装（所有项目共享）
   纯非交互     BUDGET_PLATFORM + BUDGET_GLOBAL 环境变量（CI / 脚本调用）
 
 环境变量（BUDGET_* 前缀）:
   BUDGET_REPO_URL   下载源（默认 GitHub raw 占位地址，可指向自建镜像）
   BUDGET_VERSION    指定版本 tag（默认经 releases/latest 发现最新版）
-  BUDGET_PLATFORM   codebuddy | opencode | both（跳过平台交互）
+  BUDGET_PLATFORM   codebuddy | opencode | claudecode | both | all（跳过平台交互）
+                    all = 三平台全部安装（推荐）；both = codebuddy+opencode（历史兼容值）
   BUDGET_GLOBAL     0=项目安装 / 1=全局安装（设置即跳过作用域交互）
 
 安装落点:
@@ -87,6 +89,9 @@ show_help() {
   OpenCode   项目 → .opencode/           全局 → ~/.config/opencode/
              + 管理面统一 ~/.budgetbuddy/（setup.sh/lib/models/personas/docs）
              + AGENTS.fragment.md 幂等合并进 AGENTS.md
+  Claude Code 项目 → .claude/            全局 → ~/.claude/
+             + 管理面统一 ~/.budgetbuddy/（与 OpenCode 共享）
+             + CLAUDE.fragment.md 幂等合并进 CLAUDE.md
 EOF
 }
 
@@ -154,7 +159,7 @@ check_dependencies() {
 select_platform() {
     # BUDGET_PLATFORM 显式指定 → 纯非交互；非法值忽略并警告
     case "${BUDGET_PLATFORM:-}" in
-        codebuddy|opencode|both)
+        codebuddy|opencode|claudecode|both|all)
             BUDGET_INSTALL_PLATFORM="$BUDGET_PLATFORM"
             return 0
             ;;
@@ -166,17 +171,19 @@ select_platform() {
     esac
     echo ""
     echo -e "${CYAN}请选择安装平台:${NC}"
-    echo "  1) CodeBuddy — agents/commands/skills/rules/hooks → .codebuddy/（或 ~/.codebuddy/）"
-    echo "  2) OpenCode  — agent/command/skill → opencode 目录 + 管理面 ~/.budgetbuddy/"
-    echo "  3) 两者      — 依次执行 CodeBuddy 与 OpenCode 安装"
+    echo "  1) CodeBuddy   — agents/commands/skills/rules/hooks → .codebuddy/（或 ~/.codebuddy/）"
+    echo "  2) OpenCode    — agent/command/skill → opencode 目录 + 管理面 ~/.budgetbuddy/"
+    echo "  3) Claude Code — agents/commands/skills → .claude/（或 ~/.claude/）+ 管理面 ~/.budgetbuddy/"
+    echo "  4) 全部        — 依次执行 CodeBuddy、OpenCode 与 Claude Code 安装"
     echo ""
-    echo -n "请输入 (1/2/3，默认 1): "
+    echo -n "请输入 (1/2/3/4，默认 1): "
     local choice=""
     # 交互从 /dev/tty 读取（curl|bash 管道安装也支持）；无 tty 走默认
     if read -r choice < /dev/tty 2>/dev/null; then
         case "$choice" in
             2) BUDGET_INSTALL_PLATFORM="opencode" ;;
-            3) BUDGET_INSTALL_PLATFORM="both" ;;
+            3) BUDGET_INSTALL_PLATFORM="claudecode" ;;
+            4) BUDGET_INSTALL_PLATFORM="all" ;;
             *) BUDGET_INSTALL_PLATFORM="codebuddy" ;;
         esac
     else
@@ -283,11 +290,17 @@ resolve_source() {
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd -P)" || script_dir=""
     local local_ok=true
     case "$BUDGET_INSTALL_PLATFORM" in
-        codebuddy) [[ -n "$script_dir" && -f "$script_dir/dist/codebuddy/.manifest.json" ]] || local_ok=false ;;
-        opencode)  [[ -n "$script_dir" && -f "$script_dir/dist/opencode/.manifest.json" ]] || local_ok=false ;;
+        codebuddy)  [[ -n "$script_dir" && -f "$script_dir/dist/codebuddy/.manifest.json" ]] || local_ok=false ;;
+        opencode)   [[ -n "$script_dir" && -f "$script_dir/dist/opencode/.manifest.json" ]] || local_ok=false ;;
+        claudecode) [[ -n "$script_dir" && -f "$script_dir/dist/claudecode/.manifest.json" ]] || local_ok=false ;;
         both)
             [[ -n "$script_dir" && -f "$script_dir/dist/codebuddy/.manifest.json" ]] || local_ok=false
             [[ -n "$script_dir" && -f "$script_dir/dist/opencode/.manifest.json" ]] || local_ok=false
+            ;;
+        all)
+            [[ -n "$script_dir" && -f "$script_dir/dist/codebuddy/.manifest.json" ]] || local_ok=false
+            [[ -n "$script_dir" && -f "$script_dir/dist/opencode/.manifest.json" ]] || local_ok=false
+            [[ -n "$script_dir" && -f "$script_dir/dist/claudecode/.manifest.json" ]] || local_ok=false
             ;;
     esac
     if [[ "$local_ok" == "true" ]]; then
@@ -340,8 +353,10 @@ PYEOF
 }
 
 sync_manifest_tree() {
-    # 用法: sync_manifest_tree <dist_root> <manifest_file> <dest_root> <filter>
-    #   filter: all（全部条目）| struct（agent/command/skill 前缀）| mgmt（其余）
+    # 用法: sync_manifest_tree <dist_root> <manifest_file> <dest_root> <filter> [struct_prefixes]
+    #   filter: all（全部条目）| struct（平台结构前缀）| mgmt（其余）
+    #   struct_prefixes: 平台结构目录前缀（空格分隔；默认 "agent command skill"
+    #   单数 = opencode 形态；claudecode 传 "agents commands skills" 复数）
     # 增量同步（specs/installer「manifest 增量同步」）:
     #   目标哈希与清单一致 → 跳过；不一致 → 覆盖；目标不存在 → 复制；
     #   清单外文件不枚举（一律保留）。统计入 SYNC_ADDED/UPDATED/SKIPPED。
@@ -349,6 +364,9 @@ sync_manifest_tree() {
     local manifest_file="$2"
     local dest_root="$3"
     local filter="$4"
+    local struct_prefixes="${5:-agent command skill}"
+    local sp1="" sp2="" sp3=""
+    read -r sp1 sp2 sp3 <<< "$struct_prefixes" || true
     local list_file=""
     list_file="$(mktemp 2>/dev/null || mktemp -t budget-sync)" || print_error "临时文件创建失败"
     if ! manifest_lines "$manifest_file" > "$list_file"; then
@@ -358,11 +376,18 @@ sync_manifest_tree() {
     local sha rel src dst kind dst_hash
     while IFS=$'\t' read -r sha rel; do
         [[ -n "$rel" ]] || continue
-        # 条目分类（opencode 平台结构 vs 管理面；AGENTS.fragment.md 走合并）
+        # 条目分类（平台结构 vs 管理面；*.fragment.md 统一走合并不复制——
+        # AGENTS.fragment.md / CLAUDE.fragment.md 均命中）
         case "$rel" in
-            agent/*|command/*|skill/*) kind="struct" ;;
-            AGENTS.fragment.md)         kind="fragment" ;;
-            *)                          kind="mgmt" ;;
+            *.fragment.md) kind="fragment" ;;
+            *)
+                kind="mgmt"
+                if [[ -n "$sp1" && "$rel" == "$sp1"/* ]] \
+                    || [[ -n "$sp2" && "$rel" == "$sp2"/* ]] \
+                    || [[ -n "$sp3" && "$rel" == "$sp3"/* ]]; then
+                    kind="struct"
+                fi
+                ;;
         esac
         case "$filter" in
             all)    ;;
@@ -393,20 +418,26 @@ sync_manifest_tree() {
 }
 
 upgrade_diff_cleanup() {
-    # 用法: upgrade_diff_cleanup <local_manifest> <new_manifest> <old_field> <new_filter> <root>
+    # 用法: upgrade_diff_cleanup <local_manifest> <new_manifest> <old_field> <new_filter> <root> [struct_prefixes]
     # 升级差集清理（A12②）：本地旧清单 <old_field> 键集 − 新 manifest 过滤后
     # 键集 → 逐项删除 <root>/<rel>（清单外用户自建文件不在旧清单内，不受影响）。
+    # <old_field> 支持平台命名空间后缀（"platform_files:claudecode" → 仅取
+    # "claudecode:" 前缀键并去前缀；无后缀 "platform_files" → 仅取无冒号的
+    # opencode 历史格式键，其他平台命名空间条目不属本段）。struct_prefixes
+    # 同 sync_manifest_tree（结构前缀按平台参数化）。
     # 解析失败降级为警告（清理尽力而为，不阻断安装主流程）。
     local local_manifest="$1"
     local new_manifest="$2"
     local old_field="$3"
     local new_filter="$4"
     local root="$5"
+    local struct_prefixes="${6:-agent command skill}"
     [[ -f "$local_manifest" ]] || return 0
     local list_file=""
     list_file="$(mktemp 2>/dev/null || mktemp -t budget-diff)" || return 0
     if ! BUDGET_LOCAL_MANIFEST="$local_manifest" BUDGET_NEW_MANIFEST="$new_manifest" \
         BUDGET_OLD_FIELD="$old_field" BUDGET_NEW_FILTER="$new_filter" \
+        BUDGET_STRUCT_PREFIXES="$struct_prefixes" \
         "$BUDGET_PYTHON" << 'PYEOF' > "$list_file"
 import json
 import os
@@ -420,19 +451,43 @@ def load(path):
         return {}
 
 
-old = load(os.environ['BUDGET_LOCAL_MANIFEST']).get(os.environ['BUDGET_OLD_FIELD'], {})
+# old_field 解析：字段名 + 可选平台命名空间（"platform_files:claudecode"）
+field = os.environ['BUDGET_OLD_FIELD']
+if ':' in field:
+    field_name, ns_name = field.split(':', 1)
+else:
+    field_name, ns_name = field, ''
+raw_old = load(os.environ['BUDGET_LOCAL_MANIFEST']).get(field_name, {})
+if not isinstance(raw_old, dict):
+    raw_old = {}
+if field_name == 'platform_files' and ns_name:
+    # 平台命名空间段：仅取 "<platform>:" 前缀键并去前缀（路径相对该平台结构根）
+    prefix = ns_name + ':'
+    old = dict((k[len(prefix):], v) for k, v in raw_old.items()
+               if isinstance(k, str) and k.startswith(prefix))
+elif field_name == 'platform_files':
+    # 无命名空间（opencode 历史格式）：仅取无冒号键，其他平台前缀键不属本段
+    old = dict((k, v) for k, v in raw_old.items()
+               if isinstance(k, str) and ':' not in k)
+else:
+    old = dict((k, v) for k, v in raw_old.items() if isinstance(k, str))
+
 new_files = load(os.environ['BUDGET_NEW_MANIFEST']).get('files', {})
 flt = os.environ['BUDGET_NEW_FILTER']
+prefixes = os.environ.get('BUDGET_STRUCT_PREFIXES', 'agent command skill').split()
+
+
+def is_struct(rel):
+    return any(rel.startswith(p + '/') for p in prefixes)
 
 
 def keep(rel):
     if flt == 'all':
         return True
-    is_struct = rel.startswith('agent/') or rel.startswith('command/') or rel.startswith('skill/')
     if flt == 'struct':
-        return is_struct
+        return is_struct(rel)
     if flt == 'mgmt':
-        return not is_struct and rel != 'AGENTS.fragment.md'
+        return not is_struct(rel) and not rel.endswith('.fragment.md')
     return True
 
 
@@ -462,8 +517,16 @@ PYEOF
 
 write_local_manifest() {
     # 用法: write_local_manifest <dest> <src_manifest> <mode>
-    #   mode: all      → files = 全部条目（codebuddy；排除 AGENTS.fragment.md）
-    #         opencode → files = 管理面条目 + platform_files = 平台结构条目
+    #   mode: all        → files = 全部条目（codebuddy；排除 AGENTS.fragment.md）
+    #         opencode   → files = 管理面条目 + platform_files = 平台结构条目（无前缀）
+    #         claudecode → 同构拆分，platform_files 条目带 "claudecode:" 前缀
+    # platform_files 平铺带平台前缀命名空间（辅审 M4 合并写）：opencode 条目
+    # 保持历史无前缀格式（单装产物字节级不变），claudecode 条目带
+    # "claudecode:" 前缀；两模式均合并写——保留其他平台条目（后装不覆盖
+    # 先装），仅写入/更新本平台段。claudecode 的 files 段亦合并写（管理面
+    # 与 opencode 共享 ~/.budgetbuddy/，两平台管理面产物存在差异文件，如
+    # opencode 独有 docs/setup-notes.md——保留他平台条目，仅延续磁盘仍存
+    # 在者）；opencode 的 files 段保持整段覆盖（历史行为不变）。
     # 本地清单格式与 lib/uninstall.sh 读取约定一致（{"files": {<相对路径>: <sha256>}}，
     # 路径相对安装根 ~/.budgetbuddy/；platform_files 为安装器升级差集清理的
     # 附加字段，uninstall 不读取——平台结构文件由其已知结构枚举兜底删除）。
@@ -482,29 +545,70 @@ except (OSError, ValueError) as exc:
     print('manifest 读取失败: %s' % exc, file=sys.stderr)
     sys.exit(1)
 
+dest = os.environ['BUDGET_DEST']
+dir_name = os.path.dirname(dest) or '.'
 
-def is_struct(rel):
-    return rel.startswith('agent/') or rel.startswith('command/') or rel.startswith('skill/')
+# 已有本地清单（合并写基础；缺失/损坏视为空，不阻断写入）
+existing = {}
+if os.path.isfile(dest):
+    try:
+        with open(dest, encoding='utf-8') as handle:
+            loaded = json.load(handle)
+        if isinstance(loaded, dict):
+            existing = loaded
+    except (OSError, ValueError):
+        existing = {}
+
+FRAGMENTS = ('AGENTS.fragment.md', 'CLAUDE.fragment.md')
+
+
+def is_struct(rel, prefixes):
+    return any(rel.startswith(p + '/') for p in prefixes)
 
 
 mode = os.environ['BUDGET_MODE']
-if mode == 'opencode':
+if mode in ('opencode', 'claudecode'):
+    if mode == 'opencode':
+        prefixes = ('agent', 'command', 'skill')
+        own_ns = ''                # opencode 历史格式：无前缀（单装字节级不变）
+
+        def is_own(key):
+            return ':' not in key  # 本平台段 = 无冒号键；带前缀键属其他平台
+    else:
+        prefixes = ('agents', 'commands', 'skills')
+        own_ns = 'claudecode:'
+
+        def is_own(key):
+            return key.startswith(own_ns)  # 本平台段 = claudecode: 前缀键
     files = {}
     platform_files = {}
+    raw_pf = existing.get('platform_files')
+    if isinstance(raw_pf, dict):
+        for key, sha in raw_pf.items():
+            if isinstance(key, str) and isinstance(sha, str) and not is_own(key):
+                platform_files[key] = sha
     for rel, sha in src.items():
-        if rel == 'AGENTS.fragment.md':
+        if rel in FRAGMENTS:
             continue
-        if is_struct(rel):
-            platform_files[rel] = sha
+        if is_struct(rel, prefixes):
+            platform_files[own_ns + rel] = sha
         else:
             files[rel] = sha
+    if mode == 'claudecode':
+        # files 合并写：保留其他平台管理面条目（仅延续磁盘仍存在者——
+        # 差集清理已删除的陈旧条目不延续）
+        old_files = existing.get('files')
+        if isinstance(old_files, dict):
+            for rel, sha in old_files.items():
+                if (isinstance(rel, str) and isinstance(sha, str)
+                        and rel not in files
+                        and os.path.isfile(os.path.join(dir_name, rel))):
+                    files[rel] = sha
     out = {'files': files, 'platform_files': platform_files}
 else:
     out = {'files': dict(
         (rel, sha) for rel, sha in src.items() if rel != 'AGENTS.fragment.md')}
 
-dest = os.environ['BUDGET_DEST']
-dir_name = os.path.dirname(dest) or '.'
 fd, tmp_path = tempfile.mkstemp(prefix='.budget-manifest-', suffix='.tmp', dir=dir_name)
 try:
     with os.fdopen(fd, 'w', encoding='utf-8') as tmp:
@@ -519,6 +623,50 @@ except Exception as exc:
     print('本地清单写入失败: %s' % exc, file=sys.stderr)
     sys.exit(1)
 PYEOF
+}
+
+local_manifest_other_platform() {
+    # 用法: local_manifest_other_platform <manifest_file> <platform>
+    # stdout: 1 = 本地清单 platform_files 含其他平台条目；0 = 否（清单
+    # 缺失/损坏视为无）。命名空间约定同 write_local_manifest（opencode 无
+    # 前缀——本平台段 = 无冒号键，带前缀键属他平台；其余平台如 claudecode
+    # 本平台段 = "<platform>:" 前缀键）。用途：多平台共装 ~/.budgetbuddy/ 时
+    # 跳过管理面差集清理（另一平台可能拥有本平台产物清单之外的管理面文件，
+    # 如 opencode 独有 docs/setup-notes.md，误删即破坏他平台安装）。
+    local manifest="$1" platform="$2"
+    [[ -f "$manifest" ]] || { echo 0; return 0; }
+    local result="0"
+    result="$(BUDGET_MANIFEST_FILE="$manifest" BUDGET_PLATFORM="$platform" \
+        "$BUDGET_PYTHON" << 'PYEOF' 2>/dev/null
+import json
+import os
+
+found = 0
+try:
+    with open(os.environ['BUDGET_MANIFEST_FILE'], encoding='utf-8') as handle:
+        data = json.load(handle)
+    pf = data.get('platform_files') if isinstance(data, dict) else None
+    platform = os.environ['BUDGET_PLATFORM']
+    if isinstance(pf, dict):
+        if platform == 'opencode':
+            # opencode 历史格式：本平台段 = 无冒号键；带前缀键属他平台
+            def is_other(key):
+                return ':' in key
+        else:
+            prefix = platform + ':'
+
+            def is_other(key):
+                return not key.startswith(prefix)
+        for key in pf:
+            if isinstance(key, str) and is_other(key):
+                found = 1
+                break
+except (OSError, ValueError):
+    found = 0
+print(found)
+PYEOF
+    )" || result="0"
+    echo "$result"
 }
 
 # ─── AGENTS.md 标记区块幂等合并（specs/installer「AGENTS.md 标记区块幂等合并」）
@@ -743,9 +891,15 @@ install_opencode() {
     print_success "OpenCode 文件同步完成: 结构 新增 $struct_added / 更新 $struct_updated / 跳过 ${struct_skipped}；管理面 新增 $SYNC_ADDED / 更新 $SYNC_UPDATED / 跳过 ${SYNC_SKIPPED}（清单外文件一律保留）"
     # 3) AGENTS.fragment.md 幂等合并（不复制文件，合并进 AGENTS.md）
     merge_agents_md "$dist_root/AGENTS.fragment.md" "$agents_md"
-    # 4) 升级差集清理（管理面 files + 平台结构 platform_files 两根分别清理）
+    # 4) 升级差集清理（管理面 files + 平台结构 platform_files 两根分别清理；
+    #    多平台共装时管理面清理跳过——他平台管理面文件不在本平台产物清单内，
+    #    与 claudecode 分支对称的防误删 guard，复审发现 3）
     CLEANED=0
-    upgrade_diff_cleanup "$mgmt_root/.budget-manifest.json" "$manifest_file" "files" "mgmt" "$mgmt_root"
+    if [[ "$(local_manifest_other_platform "$mgmt_root/.budget-manifest.json" "opencode")" == "1" ]]; then
+        print_info "检测到其他平台共装 ~/.budgetbuddy/，跳过管理面差集清理（避免误删他平台管理面文件）"
+    else
+        upgrade_diff_cleanup "$mgmt_root/.budget-manifest.json" "$manifest_file" "files" "mgmt" "$mgmt_root"
+    fi
     upgrade_diff_cleanup "$mgmt_root/.budget-manifest.json" "$manifest_file" "platform_files" "struct" "$struct_root"
     if [[ "$CLEANED" -gt 0 ]]; then
         print_info "升级差集清理: 已删除 $CLEANED 个旧版文件（清单外用户文件不受影响）"
@@ -767,6 +921,71 @@ install_opencode() {
     SUMMARY_OUTPUT+=""$'\n'
 }
 
+install_claudecode() {
+    # claudecode：dist/claudecode/{agents,commands,skills} → 平台结构目录
+    # （项目 .claude/ 或全局 ~/.claude/，复数目录前缀区别于 opencode 单数）；
+    # 管理面（setup.sh/lib/models/personas/docs）统一装 ~/.budgetbuddy/（A3，
+    # 与 opencode 共享，本地清单合并写）；CLAUDE.fragment.md 幂等合并进
+    # CLAUDE.md（项目根或 ~/.claude/CLAUDE.md，复用 merge_agents_md）。
+    # hooks 不注入（routing.hook 空串，同 opencode 先例）。
+    local dist_root="$BUDGET_SRC_ROOT/dist/claudecode"
+    local manifest_file="$dist_root/.manifest.json"
+    [[ -f "$manifest_file" ]] || print_error "产物清单缺失: ${manifest_file}（请先运行 python3 scripts/build.py）"
+
+    local struct_root="" mgmt_root="" claude_md="" scope_label=""
+    if [[ "$BUDGET_INSTALL_GLOBAL" == "1" ]]; then
+        struct_root="$HOME/.claude"
+        claude_md="$HOME/.claude/CLAUDE.md"
+        scope_label="全局"
+        print_info "Claude Code 全局安装 → ${struct_root}（管理面 → $HOME/.budgetbuddy）"
+    else
+        struct_root="$PWD/.claude"
+        claude_md="$PWD/CLAUDE.md"
+        scope_label="项目级"
+        print_info "Claude Code 项目安装 → ${struct_root}（管理面 → $HOME/.budgetbuddy）"
+    fi
+    mgmt_root="$HOME/.budgetbuddy"
+    local struct_prefixes="agents commands skills"
+
+    # 1) 平台结构同步（agents/commands/skills 复数前缀）
+    SYNC_ADDED=0; SYNC_UPDATED=0; SYNC_SKIPPED=0
+    sync_manifest_tree "$dist_root" "$manifest_file" "$struct_root" "struct" "$struct_prefixes"
+    local struct_added=$SYNC_ADDED struct_updated=$SYNC_UPDATED struct_skipped=$SYNC_SKIPPED
+    # 2) 管理面同步（lib/setup.sh/models/personas/docs → ~/.budgetbuddy/）
+    SYNC_ADDED=0; SYNC_UPDATED=0; SYNC_SKIPPED=0
+    sync_manifest_tree "$dist_root" "$manifest_file" "$mgmt_root" "mgmt" "$struct_prefixes"
+    print_success "Claude Code 文件同步完成: 结构 新增 $struct_added / 更新 $struct_updated / 跳过 ${struct_skipped}；管理面 新增 $SYNC_ADDED / 更新 $SYNC_UPDATED / 跳过 ${SYNC_SKIPPED}（清单外文件一律保留）"
+    # 3) CLAUDE.fragment.md 幂等合并（不复制文件，合并进 CLAUDE.md）
+    merge_agents_md "$dist_root/CLAUDE.fragment.md" "$claude_md"
+    # 4) 升级差集清理（本平台段 platform_files:claudecode + 共享管理面 files；
+    #    多平台共装时管理面清理跳过——他平台管理面文件不在本平台产物清单内）
+    CLEANED=0
+    if [[ "$(local_manifest_other_platform "$mgmt_root/.budget-manifest.json" "claudecode")" == "1" ]]; then
+        print_info "检测到其他平台共装 ~/.budgetbuddy/，跳过管理面差集清理（避免误删他平台管理面文件）"
+    else
+        upgrade_diff_cleanup "$mgmt_root/.budget-manifest.json" "$manifest_file" "files" "mgmt" "$mgmt_root" "$struct_prefixes"
+    fi
+    upgrade_diff_cleanup "$mgmt_root/.budget-manifest.json" "$manifest_file" "platform_files:claudecode" "struct" "$struct_root" "$struct_prefixes"
+    if [[ "$CLEANED" -gt 0 ]]; then
+        print_info "升级差集清理: 已删除 $CLEANED 个旧版文件（清单外用户文件不受影响）"
+    fi
+    # 5) setup.sh 可执行
+    chmod +x "$mgmt_root/setup.sh" 2>/dev/null || true
+    # 6) 本地清单（合并写：files = 管理面 + platform_files = claudecode: 前缀段）
+    write_local_manifest "$mgmt_root/.budget-manifest.json" "$manifest_file" "claudecode"
+    print_success "本地安装清单已写入: $mgmt_root/.budget-manifest.json"
+    # 7) 命令包装器（budget CLI 对 Claude Code 形态同样可用，管理面在 ~/.budgetbuddy/）
+    install_wrapper "$mgmt_root/lib"
+
+    local total=$((struct_added + struct_updated + struct_skipped + SYNC_ADDED + SYNC_UPDATED + SYNC_SKIPPED))
+    SUMMARY_OUTPUT+="平台:      Claude Code（${scope_label}）"$'\n'
+    SUMMARY_OUTPUT+="落点:      ${struct_root}（结构） + ${mgmt_root}（管理面）"$'\n'
+    SUMMARY_OUTPUT+="文件:      $total 个（新增 $((struct_added + SYNC_ADDED)) / 更新 $((struct_updated + SYNC_UPDATED)) / 跳过 $((struct_skipped + SYNC_SKIPPED))）"$'\n'
+    SUMMARY_OUTPUT+="CLAUDE.md: ${claude_md}（标记区块）"$'\n'
+    SUMMARY_OUTPUT+="命令:      $HOME/.local/bin/budget"$'\n'
+    SUMMARY_OUTPUT+=""$'\n'
+}
+
 # ─── 安装摘要（specs/installer「交互选平台 + 安装摘要输出」）───────────────
 print_summary() {
     echo ""
@@ -779,13 +998,18 @@ print_summary() {
     echo "  budget setup show          查看 Agent 模型配置"
     echo "  budget setup quickstart    快速上手向导"
     case "$BUDGET_INSTALL_PLATFORM" in
-        codebuddy|both)
+        codebuddy|both|all)
             echo "  CodeBuddy 会话内输入 /budget:start 启动工作流"
             ;;
     esac
     case "$BUDGET_INSTALL_PLATFORM" in
-        opencode|both)
+        opencode|both|all)
             echo "  OpenCode 会话内输入 /budget-start 启动工作流"
+            ;;
+    esac
+    case "$BUDGET_INSTALL_PLATFORM" in
+        claudecode|all)
+            echo "  Claude Code 会话内输入 /budget:start 启动工作流"
             ;;
     esac
     echo "  budget setup uninstall     卸载（按本地清单删除，清单外文件保留）"
@@ -828,10 +1052,12 @@ main() {
     check_dependencies
     resolve_source
     case "$BUDGET_INSTALL_PLATFORM" in
-        codebuddy) install_codebuddy ;;
-        opencode)  install_opencode ;;
-        both)      install_codebuddy; install_opencode ;;
-        *)         print_error "内部错误: 未知平台 $BUDGET_INSTALL_PLATFORM" ;;
+        codebuddy)  install_codebuddy ;;
+        opencode)   install_opencode ;;
+        claudecode) install_claudecode ;;
+        both)       install_codebuddy; install_opencode ;;
+        all)        install_codebuddy; install_opencode; install_claudecode ;;
+        *)          print_error "内部错误: 未知平台 $BUDGET_INSTALL_PLATFORM" ;;
     esac
     print_summary
 }

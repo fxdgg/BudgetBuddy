@@ -40,8 +40,11 @@ _budget_notify_config_file() {
 # ─── 内部辅助：notify.py 实际路径定位（产物安装后落点探测链）────────────
 # ① setup.sh 同目录 skills/（core 源形态与 codebuddy 安装形态共用：
 #    skills 平移到 <安装根>/skills/budget-notify/notify.py）
-# ② platform.sh 探测安装根（opencode 管理面形态：setup.sh 在 ~/.budgetbuddy/
-#    而 skills 落平台结构目录；codebuddy 各形态兜底）
+# ② platform.sh 探测安装根（opencode/claudecode 管理面形态：setup.sh 在
+#    ~/.budgetbuddy/ 而 skills 落平台结构目录；codebuddy 各形态兜底）。
+#    claudecode 落点与 opencode 同构（skills 目录在平台结构根下，复数
+#    skills/ 区别于 opencode 单数 skill/）；hooks 降级（不注入）但 notify
+#    CLI 必须可用（add-claudecode-platform D5）。
 # 全部未命中 → return 1（调用方报错）。
 _budget_locate_notify_py() {
     local candidate="${BUDGET_SETUP_DIR:-}/skills/budget-notify/notify.py"
@@ -54,6 +57,8 @@ _budget_locate_notify_py() {
     case "${BUDGET_PLATFORM_KIND:-unknown}:${BUDGET_PLATFORM_SCOPE:-}" in
         codebuddy:project) candidate="${BUDGET_PLATFORM_ROOT:-}/.codebuddy/skills/budget-notify/notify.py" ;;
         codebuddy:global)  candidate="$HOME/.codebuddy/skills/budget-notify/notify.py" ;;
+        claudecode:project) candidate="${BUDGET_PLATFORM_ROOT:-}/.claude/skills/budget-notify/notify.py" ;;
+        claudecode:global)  candidate="$HOME/.claude/skills/budget-notify/notify.py" ;;
         opencode:project)  candidate="${BUDGET_PLATFORM_ROOT:-}/.opencode/skill/budget-notify/notify.py" ;;
         opencode:global)   candidate="$HOME/.config/opencode/skill/budget-notify/notify.py" ;;
         *)                 candidate="" ;;

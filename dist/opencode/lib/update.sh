@@ -186,7 +186,7 @@ _budget_update_refresh_file() {
 
 _budget_update_admin_data() {
     # 管理面数据（budget-models.json / personas.json）覆盖刷新。
-    # 落位条件与 init 对齐（design.md §8.4）：opencode 任意形态 /
+    # 落位条件与 init 对齐（design.md §8.4）：opencode/claudecode 任意形态 /
     # codebuddy 全局 / BUDGET_GLOBAL=1 → 全局数据目录；
     # codebuddy 项目级 → 管理面数据位于安装目录本身，随安装包更新。
     local global_dir="$1"
@@ -194,7 +194,7 @@ _budget_update_admin_data() {
     local platform_scope="$3"
 
     local need_admin=false
-    if [[ "$platform_kind" == "opencode" \
+    if [[ "$platform_kind" == "opencode" || "$platform_kind" == "claudecode" \
           || ( "$platform_kind" == "codebuddy" && "$platform_scope" == "global" ) \
           || "${BUDGET_GLOBAL:-0}" == "1" ]]; then
         need_admin=true
@@ -263,7 +263,7 @@ _budget_diff_render() {
     detect_platform >/dev/null || true
     if [[ "${BUDGET_PLATFORM_KIND:-unknown}" == "unknown" ]]; then
         budget_print_error "未检测到 BudgetBuddy 平台形态，无法定位 agent 目录"
-        budget_print_info "提示：可设置 BUDGET_PLATFORM=codebuddy|opencode 显式指定平台"
+        budget_print_info "提示：可设置 BUDGET_PLATFORM=codebuddy|claudecode|opencode 显式指定平台"
         return 1
     fi
 
@@ -411,7 +411,7 @@ do_update() {
             global_only=true
         else
             budget_print_error "未检测到 BudgetBuddy 安装形态（三级探测均未命中）"
-            budget_print_info "请先安装本套件，或设置 BUDGET_PLATFORM=codebuddy|opencode 显式指定平台"
+            budget_print_info "请先安装本套件，或设置 BUDGET_PLATFORM=codebuddy|claudecode|opencode 显式指定平台"
             budget_print_info "或设置 BUDGET_GLOBAL=1 执行纯全局数据同步"
             return 1
         fi

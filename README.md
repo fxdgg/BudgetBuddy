@@ -2,7 +2,7 @@
 
 **English** | [中文](README_CN.md) | [Changelog](CHANGELOG.md) | [License](LICENSE)
 
-BudgetBuddy is a multi-agent, cost-saving development workflow kit. It routes every task to the right sub-agent with the right model, so simple tasks burn cheap tokens and only hard tasks burn expensive ones. One neutral source (`core/`) builds into platform-specific distributions for **CodeBuddy** and **OpenCode**; other agent platforms can be added by extending the build DSL (`core/platform/*.yaml`).
+BudgetBuddy is a multi-agent, cost-saving development workflow kit. It routes every task to the right sub-agent with the right model, so simple tasks burn cheap tokens and only hard tasks burn expensive ones. One neutral source (`core/`) builds into platform-specific distributions for **CodeBuddy**, **OpenCode**, and **Claude Code**; other agent platforms can be added by extending the build DSL (`core/platform/*.yaml`).
 
 ## What is BudgetBuddy?
 
@@ -20,7 +20,7 @@ The kit is self-bootstrapped: this repository is developed with BudgetBuddy's ow
 - **Coder Guard** — per-coder, per-task-tag failure records over a 5-attempt window; 2+ failures trigger automatic tier downgrade
 - **Goal Loop** — goal-driven macro loop: define goal → run pipeline → verify → iterate until the goal is met (max 8 iterations, safety boundaries included)
 - **OpenSpec change management** — propose / apply / archive / explore commands with spec-driven change tracking
-- **Dual-platform build** — single `core/` source, `scripts/build.py` emits `dist/codebuddy/` and `dist/opencode/`
+- **Multi-platform build** — single `core/` source, `scripts/build.py` emits `dist/codebuddy/`, `dist/opencode/`, and `dist/claudecode/`
 - **Superpowers integration** — quality-practice skills (TDD, systematic debugging) referenced at the right phases; workflow degrades gracefully when the plugin is absent
 
 ## Installation
@@ -33,10 +33,12 @@ curl -fsSL https://raw.githubusercontent.com/fxdgg/BudgetBuddy/main/install.sh |
 
 > ⚠️ **Trust boundary**: `curl | bash` executes a remote script with your privileges. Review the script first (`curl -fsSL https://raw.githubusercontent.com/fxdgg/BudgetBuddy/main/install.sh | less`) before piping it to bash. The installer downloads the release zip and **enforces SHA256 verification** — it aborts on checksum mismatch and never installs a corrupted package.
 
-Interactive mode asks for platform (CodeBuddy / OpenCode / both) and scope (project / global). Non-interactive:
+Interactive mode asks for platform (CodeBuddy / OpenCode / Claude Code / all) and scope (project / global). Non-interactive — `BUDGET_PLATFORM` accepts `codebuddy` / `opencode` / `claudecode` / `both` / `all` (`all` installs all three platforms, recommended; `both` = CodeBuddy + OpenCode, kept for historical compatibility):
 
 ```bash
 BUDGET_PLATFORM=opencode BUDGET_GLOBAL=1 bash install.sh   # global OpenCode install
+BUDGET_PLATFORM=claudecode BUDGET_GLOBAL=1 bash install.sh # global Claude Code install
+BUDGET_PLATFORM=all bash install.sh                        # all three platforms (recommended)
 ```
 
 ### Manual install
@@ -53,9 +55,11 @@ bash install.sh
 |----------|--------------------------|------------------|
 | CodeBuddy | `.codebuddy/` (project) or `~/.codebuddy/` (global) | `~/.budgetbuddy/` |
 | OpenCode | `.opencode/` (project) or `~/.config/opencode/` (global) | `~/.budgetbuddy/` |
+| Claude Code | `.claude/` (project) or `~/.claude/` (global) | `~/.budgetbuddy/` |
 
 - **CodeBuddy**: agents/rules/skills/commands land under `.codebuddy/`; hooks are injected into `settings.json` (with backup) and the Superpowers plugin is auto-enabled; the `budget` CLI is written to `~/.local/bin/budget`.
 - **OpenCode**: agents/commands/skills land under the OpenCode directory; rules are merged into `AGENTS.md` as a marked block; hooks have no native equivalent — see `core/docs/opencode-setup-notes.md` for the plugin extension point.
+- **Claude Code**: agents/commands/skills land under `.claude/` (project) or `~/.claude/` (global); rules are merged into `CLAUDE.md` (project root or `~/.claude/CLAUDE.md`) as a marked block; the management plane is shared with OpenCode under `~/.budgetbuddy/`; hooks are not injected in the first release — notifications fall back to the `budget notify` CLI.
 - Windows: use Git Bash or WSL (PowerShell aliases `curl` to `Invoke-WebRequest`).
 - Project and global installs can coexist; project-level takes priority.
 
@@ -73,24 +77,32 @@ bash install.sh
 /budget-start "Add user login API with JWT auth"
 ```
 
+### Claude Code
+
+```
+/budget:start "Add user login API with JWT auth"
+```
+
+A project-level install lands agents/commands/skills under `.claude/` and merges the rules into `CLAUDE.md` as a marked block; a global install lands under `~/.claude/` (with `~/.claude/CLAUDE.md`). ⚠️ Hooks notifications are not supported on Claude Code in the first release — use `budget notify "<msg>" <event>` instead.
+
 The Leader analyzes the request, dispatches architect → dual reviewers → tiered coders → tester → final review → recorder, and reports back. For goal-driven iteration:
 
 ```
-/budget:goal "Keep improving until all tests pass and coverage >= 80%"   # CodeBuddy
+/budget:goal "Keep improving until all tests pass and coverage >= 80%"   # CodeBuddy / Claude Code
 /budget-goal "Keep improving until all tests pass and coverage >= 80%"   # OpenCode
 ```
 
 ### Common commands
 
-| Command (CodeBuddy) | Command (OpenCode) | Purpose |
-|---------------------|---------------------|---------|
-| `/budget:start <requirement>` | `/budget-start <requirement>` | Start the five-phase workflow |
-| `/budget:goal <goal>` | `/budget-goal <goal>` | Start / resume the Goal Loop |
-| `/budget:status` | `/budget-status` | Query workflow progress |
-| `/opsx:propose` | `/opsx-propose` | Propose a new OpenSpec change |
-| `/opsx:apply` | `/opsx-apply` | Implement tasks from a change |
-| `/opsx:archive` | `/opsx-archive` | Archive a completed change |
-| `/opsx:explore` | `/opsx-explore` | Explore ideas before proposing |
+| Command (CodeBuddy) | Command (OpenCode) | Command (Claude Code) | Purpose |
+|---------------------|---------------------|-----------------------|---------|
+| `/budget:start <requirement>` | `/budget-start <requirement>` | `/budget:start <requirement>` | Start the five-phase workflow |
+| `/budget:goal <goal>` | `/budget-goal <goal>` | `/budget:goal <goal>` | Start / resume the Goal Loop |
+| `/budget:status` | `/budget-status` | `/budget:status` | Query workflow progress |
+| `/opsx:propose` | `/opsx-propose` | `/opsx:propose` | Propose a new OpenSpec change |
+| `/opsx:apply` | `/opsx-apply` | `/opsx:apply` | Implement tasks from a change |
+| `/opsx:archive` | `/opsx-archive` | `/opsx:archive` | Archive a completed change |
+| `/opsx:explore` | `/opsx-explore` | `/opsx:explore` | Explore ideas before proposing |
 
 Natural language triggers ("start development", "implement X", "fix X bug") activate the same workflow.
 
@@ -163,6 +175,18 @@ flowchart TD
     GE -.->|"achieved — N11"| L
 ```
 
+### Build and platform distribution
+
+```mermaid
+flowchart LR
+    CORE["core/ — single neutral source"] --> BP["scripts/build.py — core/platform/*.yaml"]
+    BP -->|"atomic replace"| DIST["dist/ — codebuddy / opencode / claudecode"]
+    DIST --> INST["install.sh — download + SHA256 + incremental sync"]
+    INST --> CB["CodeBuddy — .codebuddy/ or ~/.codebuddy/"]
+    INST --> OC["OpenCode — .opencode/ or ~/.config/opencode/"]
+    INST --> CC["Claude Code — .claude/ or ~/.claude/"]
+```
+
 ### Key rules
 
 - **Leader never writes code** — every code change goes through a tiered coder agent, even a one-line typo
@@ -175,11 +199,15 @@ Component-level diagrams live in [`core/docs/architecture.md`](core/docs/archite
 
 ## Model Presets
 
-| Preset | Positioning | Typical shape |
-|--------|-------------|---------------|
-| `economic` | Maximum savings | Free/budget models carry most roles; premium model only for the final verdict |
-| `balanced` | Balanced (recommended) | High-value models on architect/reviewer, mid-tier on coders, budget models on tester/recorder |
-| `quality` | Maximum quality | Premium models on architect/coder-senior/director, strong models elsewhere |
+| Preset | Positioning | Typical shape | Claude Code native models | CodeBuddy typical models | OpenCode typical models |
+|--------|-------------|---------------|---------------------------|---------------------------|--------------------------|
+| `economic` | Maximum savings | Free/budget models carry most roles; premium model only for the final verdict | haiku family (`claude-haiku-5-5`) | `deepseek-v4-flash` | `deepseek/deepseek-flash` |
+| `balanced` | Balanced (recommended) | High-value models on architect/reviewer, mid-tier on coders, budget models on tester/recorder | sonnet family (`claude-sonnet-5-5`) | `deepseek-v4-flash` | `deepseek/deepseek-flash` |
+| `quality` | Maximum quality | Premium models on architect/coder-senior/director, strong models elsewhere | opus family (`claude-opus-5-5`) | `deepseek-v4-pro` | `deepseek/deepseek-v4-pro` |
+
+> Typical models are the `coder_standard` role's model ID per tier in `core/models/budget-models.json`; the full per-platform preset tables are generated at build time into `dist/<platform>/docs/MODEL_SELECTION.md` (also see `budget setup models`).
+>
+> The Claude Code native model IDs for the three presets were verified in a real Claude Code environment on 2026-10-20 (Claude Code CLI 2.1.304, zero warnings); use `budget setup agent custom` to override.
 
 ```bash
 budget setup agent preset economic    # switch preset (rewrites agent frontmatter)
@@ -213,6 +241,7 @@ Configure once in `.budget/notify.json` (project) or `~/.budgetbuddy/notify.json
 - **11 event switches (N1–N11)** — design-review rejections, review-gate exhaustion, loop overrun, Director intervention, phase transitions, goal achievement, etc.
 - **Delivery semantics** — markdown payload, 5s timeout per channel, first success stops delivery, all failures are silent (never blocks the workflow)
 - **Security** — the config file is `chmod 600` (owner-only); webhook/secret values never pass through environment variables, command-line arguments, or logs; error output is sanitized to hostname only
+- **Claude Code** — hooks notifications are not supported in the first release (no hook injection); send notifications explicitly via `budget notify "<msg>" <event>`
 
 ## Repository Layout
 
@@ -226,16 +255,17 @@ BudgetBuddy/
 │   ├── lib/               # management-plane modules (setup, state, guard, notify, ...)
 │   ├── models/            # budget-models.json + schema
 │   ├── personas/          # 5 persona themes
-│   ├── platform/          # codebuddy.yaml / opencode.yaml mapping DSL
+│   ├── platform/          # codebuddy.yaml / claudecode.yaml / opencode.yaml mapping DSL
 │   ├── rules/             # 12 rules (3 P0 + 8 code standards + rtk)
 │   ├── skills/            # budget-workflow, budget-notify, 4 openspec skills
 │   └── setup.sh           # budget setup entry
 ├── dist/                  # build output (do NOT hand-edit)
 │   ├── codebuddy/
+│   ├── claudecode/
 │   └── opencode/
 ├── scripts/               # build.py, scan-brand.py, build-release.sh
 ├── tests/                 # unit tests (python3 -m unittest)
-├── install.sh             # dual-platform installer
+├── install.sh             # three-platform installer
 └── VERSION
 ```
 
@@ -243,6 +273,7 @@ BudgetBuddy/
 
 - **Edit `core/`, never `dist/`** — `dist/` is generated; hand edits are overwritten and fail the check
 - **Build & gate**: `python3 scripts/build.py --check` (also `--strict` for warning-as-error runs)
+- **Multi-platform build**: `python3 scripts/build.py [--platform <platform>]` — the valid platform list is enumerated at build time from `core/platform/*.yaml` (currently `codebuddy` / `claudecode` / `opencode`); without `--platform`, all platforms are built
 - **Brand gate**: `python3 scripts/scan-brand.py` — scans `core/`, `dist/`, `scripts/`, `install.sh`, `README.md`, `README_CN.md`, `CHANGELOG.md` for forbidden terms (the reference project's brand words); the gate must exit 0
 - **Tests**: `python3 -m unittest discover -s tests`
 - **Release**: `bash scripts/build-release.sh` — runs the check, reads `VERSION`, packages `budgetbuddy-<version>.zip` + `.sha256`

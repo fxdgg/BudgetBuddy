@@ -421,7 +421,7 @@ budget_cmd_help() {
 环境变量（BUDGET_* 前缀）:
   BUDGET_GLOBAL   全局模式标志（1=全局）
   BUDGET_DIR      运行时数据目录覆盖（默认 .budget/ > ~/.budgetbuddy/）
-  BUDGET_PLATFORM 显式指定平台（codebuddy|opencode，跳过运行时探测）
+  BUDGET_PLATFORM 显式指定平台（codebuddy|claudecode|opencode，跳过运行时探测）
 EOF
 }
 

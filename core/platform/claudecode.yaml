@@ -1,0 +1,45 @@
+# Claude Code 平台映射 DSL（design.md §3.5，build.py 为唯一消费者）。
+platform: claudecode
+output: dist/claudecode
+routing:
+  agent:   "agents/{name}.md"
+  command: "commands/{group}/{name}.md"     # 与 codebuddy 同构 → /budget:start
+  skill:   "skills/{skill}/"
+  rule:    "CLAUDE.fragment.md"             # 与 extra_outputs dest 一致（同 opencode 模式）
+  hook:    ""                               # 首发降级不分发（同 opencode 先例）
+  models:  "budget-models.json"
+  personas: "personas.json"
+  lib:     "lib/"
+  setup:   "setup.sh"
+  docs:
+    MODEL_SELECTION.template.md: "docs/MODEL_SELECTION.md"
+    PERSONAS.md: "docs/PERSONAS.md"
+    architecture.md: "docs/architecture.md"
+    opencode-setup-notes.md: null
+agent_frontmatter:
+  emit:
+    name: "{name}"
+    description: "{description}"
+    model: "{resolved_model}"
+    tools: "{tools|pascal}"
+    permissionMode: "{permission_mode}"     # camelCase 键：emit 输出键名任意，零 schema 扩展
+    maxTurns: "{max_turns}"
+  permission_mode_rule: { edit_all: "acceptEdits", edit_restricted: "plan" }
+  drop: [model_role, permissions]
+command_frontmatter:
+  emit: [description, argument-hint]        # 命令名由产物文件名承载；不输出 name（Claude Code 按文件名识别）
+  drop: [name]
+command:
+  invoke: "/{group}:{name}"
+body_variables:
+  TASK_TOOL: "Task"                         # Claude Code 派发工具名（区别于 CodeBuddy 的 Agent）
+  SKILL_NS: ""
+  AGENT_DIR: ".claude/agents/（项目级；不存在则 ~/.claude/agents/）"
+  GUARD_PATH: "$HOME/.budgetbuddy/projects/<project-name>/memory/coder-guard.json"
+  RULES_DIR: "CLAUDE.md 标记区块（安装器合并）"
+  PROJECT_DOC: "启动时读取项目根 CLAUDE.md（如保留 CODEBUDDY.md/AGENTS.md，一并参考）"
+extra_outputs:
+  - kind: agents_fragment
+    source: "rules/**"
+    dest: "CLAUDE.fragment.md"
+    markers: ["<!-- BudgetBuddy:begin -->", "<!-- BudgetBuddy:end -->"]

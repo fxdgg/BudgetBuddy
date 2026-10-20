@@ -1,0 +1,751 @@
+{
+  "_meta": {
+    "description": "BudgetBuddy 可用模型目录与三平台（CodeBuddy/OpenCode/Claude Code）三档预设配置",
+    "update_command": "budget setup models",
+    "updated_at": "2026-10-20"
+  },
+  "aliases": {
+    "codex": "gpt-5.3-codex",
+    "deepseek": "deepseek-v3.2",
+    "gemini-flash": "gemini-3.5-flash",
+    "gemini-pro": "gemini-3.1-pro",
+    "glm": "glm-5.2",
+    "gpt": "gpt-5.4",
+    "haiku": "claude-haiku-4.5",
+    "kimi": "kimi-k2.7",
+    "kimi-code": "kimi-k2.7",
+    "opus": "claude-opus-4.8-1m",
+    "opus-4.6": "claude-opus-4.6-1m",
+    "opus-4.7": "claude-opus-4.7-1m",
+    "opus-4.8": "claude-opus-4.8-1m",
+    "sonnet": "claude-sonnet-4.6-1m",
+    "sonnet-4.6": "claude-sonnet-4.6-1m"
+  },
+  "models": {
+    "free": {
+      "hunyuan": [
+        {
+          "cost": "x0.00",
+          "id": "hy3",
+          "note": "SWE-bench Verified 78.0%、GPQA 90.4%，免费模型中综合能力最强",
+          "platform": [
+            "codebuddy"
+          ],
+          "recommended_for": [
+            "coder_lite",
+            "tester",
+            "recorder"
+          ],
+          "tags": [
+            "general",
+            "agent",
+            "reasoning"
+          ],
+          "tier": "free"
+        },
+        {
+          "cost": "x0.00",
+          "id": "hunyuan-2.0-thinking",
+          "platform": [
+            "codebuddy"
+          ],
+          "tags": [
+            "reasoning"
+          ],
+          "tier": "free"
+        }
+      ],
+      "kimi": [
+        {
+          "cost": "x0.00",
+          "id": "kimi-k2.5",
+          "platform": [
+            "codebuddy"
+          ],
+          "recommended_for": [
+            "tester"
+          ],
+          "tags": [
+            "general",
+            "agent"
+          ],
+          "tier": "free"
+        }
+      ],
+      "opencode": [
+        {
+          "cost": "x0.00",
+          "id": "deepseek-v4.1-flash-free",
+          "note": "OpenCode 官方免费系，经本机 opencode models 核对存在",
+          "platform": [
+            "opencode"
+          ],
+          "tags": [
+            "code",
+            "fast"
+          ],
+          "tier": "free"
+        },
+        {
+          "cost": "x0.00",
+          "id": "glm-5.3-flash-free",
+          "note": "OpenCode 官方免费系，经本机 opencode models 核对存在",
+          "platform": [
+            "opencode"
+          ],
+          "tags": [
+            "general",
+            "fast"
+          ],
+          "tier": "free"
+        }
+      ]
+    },
+    "paid": {
+      "claude": [
+        {
+          "cost": "x3.50",
+          "id": "claude-opus-5-5",
+          "note": "官方 Claude Code 默认模型（$4/百万输入），2026-09-22 发布；经本机 Claude Code 2.1.304 实测核对（2026-10-20）",
+          "platform": [
+            "claudecode"
+          ],
+          "tags": [
+            "reasoning"
+          ],
+          "tier": "top"
+        },
+        {
+          "cost": "x3.50",
+          "id": "claude-opus-4.8",
+          "platform": [
+            "codebuddy",
+            "opencode",
+            "claudecode"
+          ],
+          "tags": [
+            "reasoning"
+          ],
+          "tier": "top"
+        },
+        {
+          "cost": "x3.50",
+          "id": "claude-opus-4.8-1m",
+          "platform": [
+            "codebuddy",
+            "opencode",
+            "claudecode"
+          ],
+          "tags": [
+            "reasoning",
+            "long-context"
+          ],
+          "tier": "top"
+        },
+        {
+          "cost": "x3.33",
+          "id": "claude-opus-4.7-1m",
+          "platform": [
+            "codebuddy",
+            "opencode",
+            "claudecode"
+          ],
+          "tags": [
+            "reasoning",
+            "long-context"
+          ],
+          "tier": "top"
+        },
+        {
+          "cost": "x3.33",
+          "id": "claude-opus-4.7",
+          "platform": [
+            "codebuddy",
+            "opencode",
+            "claudecode"
+          ],
+          "tags": [
+            "reasoning"
+          ],
+          "tier": "top"
+        },
+        {
+          "cost": "x3.33",
+          "id": "claude-opus-4.6-1m",
+          "platform": [
+            "codebuddy",
+            "opencode",
+            "claudecode"
+          ],
+          "tags": [
+            "reasoning",
+            "long-context"
+          ],
+          "tier": "top"
+        },
+        {
+          "cost": "x3.33",
+          "id": "claude-opus-4.6",
+          "platform": [
+            "codebuddy",
+            "opencode",
+            "claudecode"
+          ],
+          "tags": [
+            "reasoning"
+          ],
+          "tier": "top"
+        },
+        {
+          "cost": "x2.00",
+          "id": "claude-sonnet-5-5",
+          "note": "2026-09-28 发布（$2/$10 定价）；经本机 Claude Code 2.1.304 实测核对（2026-10-20）",
+          "platform": [
+            "claudecode"
+          ],
+          "tags": [
+            "general"
+          ],
+          "tier": "mid"
+        },
+        {
+          "cost": "x2.00",
+          "id": "claude-sonnet-4.6-1m",
+          "platform": [
+            "codebuddy",
+            "opencode",
+            "claudecode"
+          ],
+          "tags": [
+            "general",
+            "long-context"
+          ],
+          "tier": "mid"
+        },
+        {
+          "cost": "x2.00",
+          "id": "claude-sonnet-4.6",
+          "platform": [
+            "codebuddy",
+            "opencode",
+            "claudecode"
+          ],
+          "tags": [
+            "general"
+          ],
+          "tier": "mid"
+        },
+        {
+          "cost": "x0.67",
+          "id": "claude-haiku-5-5",
+          "note": "2026-10-07 发布；经本机 Claude Code 2.1.304 实测核对（2026-10-20）",
+          "platform": [
+            "claudecode"
+          ],
+          "tags": [
+            "fast"
+          ],
+          "tier": "budget"
+        },
+        {
+          "cost": "x0.67",
+          "id": "claude-haiku-4.5",
+          "platform": [
+            "codebuddy",
+            "opencode",
+            "claudecode"
+          ],
+          "tags": [
+            "fast"
+          ],
+          "tier": "budget"
+        }
+      ],
+      "deepseek": [
+        {
+          "cost": "x0.13",
+          "id": "deepseek-v4-pro",
+          "note": "SWE-bench 80.6%、LiveCodeBench 93.5%、1M context，性价比极高，经本机 opencode models 核对存在",
+          "platform": [
+            "codebuddy",
+            "opencode"
+          ],
+          "recommended_for": [
+            "coder_senior",
+            "coder_standard",
+            "architect",
+            "reviewer"
+          ],
+          "tags": [
+            "code",
+            "agent",
+            "reasoning",
+            "long-context"
+          ],
+          "tier": "mid"
+        },
+        {
+          "cost": "x0.05",
+          "id": "deepseek-v4-flash",
+          "note": "SWE-bench 79.0%、1M context，极低价格",
+          "platform": [
+            "codebuddy"
+          ],
+          "recommended_for": [
+            "coder_standard",
+            "coder_lite"
+          ],
+          "tags": [
+            "code",
+            "fast",
+            "long-context"
+          ],
+          "tier": "budget"
+        },
+        {
+          "cost": "x0.15",
+          "id": "deepseek-v3.2",
+          "note": "旧版，建议升级到 V4",
+          "platform": [
+            "codebuddy"
+          ],
+          "tags": [
+            "general"
+          ],
+          "tier": "budget"
+        },
+        {
+          "cost": "x0.05",
+          "id": "deepseek-flash",
+          "note": "OpenCode deepseek provider 的 flash 系 ID（与 deepseek-v4-flash 同代），经本机核对存在",
+          "platform": [
+            "opencode"
+          ],
+          "tags": [
+            "code",
+            "fast",
+            "long-context"
+          ],
+          "tier": "budget"
+        }
+      ],
+      "gemini": [
+        {
+          "cost": "x0.99",
+          "id": "gemini-3.5-flash",
+          "note": "Terminal-Bench 76.2%、MCP Atlas 83.6%、Agent Elo 1656",
+          "platform": [
+            "codebuddy",
+            "opencode"
+          ],
+          "recommended_for": [
+            "tester"
+          ],
+          "tags": [
+            "agent",
+            "tool-use",
+            "fast"
+          ],
+          "tier": "mid"
+        },
+        {
+          "cost": "x0.90",
+          "id": "gemini-2.5-pro",
+          "note": "已弃用：路由稳定性问题，不推荐用作 agent 模型",
+          "platform": [
+            "codebuddy",
+            "opencode"
+          ],
+          "tags": [
+            "reasoning"
+          ],
+          "tier": "mid"
+        },
+        {
+          "cost": "x1.32",
+          "id": "gemini-3.1-pro",
+          "platform": [
+            "codebuddy",
+            "opencode"
+          ],
+          "tags": [
+            "general"
+          ],
+          "tier": "mid"
+        }
+      ],
+      "glm": [
+        {
+          "cost": "x1.06",
+          "id": "glm-5.2",
+          "note": "开源系最强文本模型之一：Terminal-Bench 81%、SWE-bench Pro 62.1%、1M context",
+          "platform": [
+            "codebuddy",
+            "opencode"
+          ],
+          "recommended_for": [
+            "architect",
+            "coder_senior",
+            "reviewer"
+          ],
+          "tags": [
+            "code",
+            "agent",
+            "reasoning",
+            "long-context"
+          ],
+          "tier": "top"
+        },
+        {
+          "cost": "x0.90",
+          "id": "glm-5.1",
+          "note": "已被 GLM-5.2 大幅超越，建议升级",
+          "platform": [
+            "codebuddy",
+            "opencode"
+          ],
+          "tags": [
+            "code",
+            "agent"
+          ],
+          "tier": "mid"
+        },
+        {
+          "cost": "x0.81",
+          "id": "glm-5v-turbo",
+          "note": "多模态视觉编程基座，适合设计稿转代码与 UI 截图分析场景",
+          "platform": [
+            "codebuddy",
+            "opencode"
+          ],
+          "tags": [
+            "multimodal",
+            "code",
+            "tool-use"
+          ],
+          "tier": "light"
+        },
+        {
+          "cost": "x0.68",
+          "id": "glm-5.0",
+          "platform": [
+            "codebuddy",
+            "opencode"
+          ],
+          "tags": [
+            "general"
+          ],
+          "tier": "light"
+        },
+        {
+          "cost": "x0.23",
+          "id": "glm-4.7",
+          "platform": [
+            "codebuddy",
+            "opencode"
+          ],
+          "tags": [
+            "general",
+            "fast"
+          ],
+          "tier": "budget"
+        }
+      ],
+      "gpt": [
+        {
+          "cost": "x3.31",
+          "id": "gpt-5.5",
+          "platform": [
+            "codebuddy",
+            "opencode"
+          ],
+          "tags": [
+            "general"
+          ],
+          "tier": "top"
+        },
+        {
+          "cost": "x1.65",
+          "id": "gpt-5.4",
+          "platform": [
+            "codebuddy",
+            "opencode"
+          ],
+          "tags": [
+            "general"
+          ],
+          "tier": "top"
+        },
+        {
+          "cost": "x1.25",
+          "id": "gpt-5.3-codex",
+          "platform": [
+            "codebuddy",
+            "opencode"
+          ],
+          "tags": [
+            "code"
+          ],
+          "tier": "mid"
+        },
+        {
+          "cost": "x0.90",
+          "id": "gpt-5.1-codex",
+          "platform": [
+            "codebuddy",
+            "opencode"
+          ],
+          "tags": [
+            "code"
+          ],
+          "tier": "light"
+        },
+        {
+          "cost": "x0.18",
+          "id": "gpt-5.1-codex-mini",
+          "platform": [
+            "codebuddy",
+            "opencode"
+          ],
+          "tags": [
+            "code",
+            "fast"
+          ],
+          "tier": "budget"
+        }
+      ],
+      "kimi": [
+        {
+          "cost": "x0.65",
+          "id": "kimi-k2.7",
+          "note": "K2.6 的编程专用强化版，长程任务 token 消耗显著降低",
+          "platform": [
+            "codebuddy",
+            "opencode"
+          ],
+          "recommended_for": [
+            "reviewer",
+            "reviewer_b",
+            "tester"
+          ],
+          "tags": [
+            "code",
+            "agent",
+            "tool-use",
+            "long-context"
+          ],
+          "tier": "mid"
+        },
+        {
+          "cost": "x0.50",
+          "id": "kimi-k2.6",
+          "note": "已被 K2.7 超越，建议升级到 kimi-k2.7",
+          "platform": [
+            "codebuddy",
+            "opencode"
+          ],
+          "tags": [
+            "agent",
+            "tool-use",
+            "long-context"
+          ],
+          "tier": "mid"
+        }
+      ],
+      "minimax": [
+        {
+          "cost": "x0.19",
+          "id": "minimax-m2.7",
+          "platform": [
+            "codebuddy"
+          ],
+          "tags": [
+            "general",
+            "fast"
+          ],
+          "tier": "budget"
+        },
+        {
+          "cost": "x0.13",
+          "id": "minimax-m2.5",
+          "platform": [
+            "codebuddy"
+          ],
+          "tags": [
+            "general",
+            "fast"
+          ],
+          "tier": "budget"
+        }
+      ]
+    }
+  },
+  "platforms": {
+    "claudecode": {
+      "note": [
+        "- 本平台预设值为 Claude Code 原生 claude 系模型 ID（economic→haiku 系、balanced→sonnet 系、quality→opus 系三档梯度）；构建期以 balanced 档烘焙 agent 产物的 model 字段。",
+        "- 三档预设模型 ID（claude-haiku-5-5 / claude-sonnet-5-5 / claude-opus-5-5）已于 2026-10-20 在本机 Claude Code 2.1.304 实测核对（零告警、调用成功）。",
+        "- 安装后可通过 `budget setup agent preset <economic|balanced|quality>` 批量切换档位，`budget setup agent custom <模型ID或别名>` 自定义覆写（简写别名经 aliases 表解析），`budget setup agent inherit` 跟随主会话模型。",
+        "- hooks 通知首发不支持（routing.hook 为空串不分发），通知能力经 notify CLI 降级路径提供。"
+      ],
+      "presets": {
+        "balanced": {
+          "architect": "claude-sonnet-5-5",
+          "coder_lite": "claude-sonnet-5-5",
+          "coder_senior": "claude-sonnet-5-5",
+          "coder_standard": "claude-sonnet-5-5",
+          "director": "claude-sonnet-5-5",
+          "goal_evaluator": "claude-sonnet-5-5",
+          "recorder": "claude-sonnet-5-5",
+          "reviewer": "claude-sonnet-5-5",
+          "reviewer_b": "claude-sonnet-5-5",
+          "tester": "claude-sonnet-5-5"
+        },
+        "economic": {
+          "architect": "claude-haiku-5-5",
+          "coder_lite": "claude-haiku-5-5",
+          "coder_senior": "claude-haiku-5-5",
+          "coder_standard": "claude-haiku-5-5",
+          "director": "claude-haiku-5-5",
+          "goal_evaluator": "claude-haiku-5-5",
+          "recorder": "claude-haiku-5-5",
+          "reviewer": "claude-haiku-5-5",
+          "reviewer_b": "claude-haiku-5-5",
+          "tester": "claude-haiku-5-5"
+        },
+        "quality": {
+          "architect": "claude-opus-5-5",
+          "coder_lite": "claude-opus-5-5",
+          "coder_senior": "claude-opus-5-5",
+          "coder_standard": "claude-opus-5-5",
+          "director": "claude-opus-5-5",
+          "goal_evaluator": "claude-opus-5-5",
+          "recorder": "claude-opus-5-5",
+          "reviewer": "claude-opus-5-5",
+          "reviewer_b": "claude-opus-5-5",
+          "tester": "claude-opus-5-5"
+        }
+      }
+    },
+    "codebuddy": {
+      "note": [
+        "- 本平台预设值为 CodeBuddy 原生模型 ID（kebab-case）；构建期以 balanced 档烘焙 agent 产物的 model 字段。",
+        "- 安装后可通过 `budget setup agent preset <economic|balanced|quality>` 批量切换档位，`budget setup agent custom <模型ID或别名>` 自定义覆写（简写别名经 aliases 表解析），`budget setup agent inherit` 跟随主会话模型。"
+      ],
+      "presets": {
+        "balanced": {
+          "architect": "glm-5.2",
+          "coder_lite": "hy3",
+          "coder_senior": "deepseek-v4-pro",
+          "coder_standard": "deepseek-v4-flash",
+          "director": "claude-opus-4.7-1m",
+          "goal_evaluator": "claude-haiku-4.5",
+          "recorder": "hy3",
+          "reviewer": "deepseek-v4-pro",
+          "reviewer_b": "kimi-k2.7",
+          "tester": "kimi-k2.7"
+        },
+        "economic": {
+          "architect": "deepseek-v4-pro",
+          "coder_lite": "hy3",
+          "coder_senior": "deepseek-v4-pro",
+          "coder_standard": "deepseek-v4-flash",
+          "director": "claude-opus-4.6-1m",
+          "goal_evaluator": "kimi-k2.5",
+          "recorder": "hy3",
+          "reviewer": "hy3",
+          "reviewer_b": "hunyuan-2.0-thinking",
+          "tester": "hy3"
+        },
+        "quality": {
+          "architect": "claude-opus-4.7-1m",
+          "coder_lite": "deepseek-v4-flash",
+          "coder_senior": "claude-sonnet-4.6-1m",
+          "coder_standard": "deepseek-v4-pro",
+          "director": "claude-opus-4.7-1m",
+          "goal_evaluator": "claude-haiku-4.5",
+          "recorder": "claude-haiku-4.5",
+          "reviewer": "kimi-k2.7",
+          "reviewer_b": "deepseek-v4-pro",
+          "tester": "gemini-3.5-flash"
+        }
+      }
+    },
+    "opencode": {
+      "note": [
+        "- 本平台预设值为 `provider/model` 格式（anthropic/openai/google/zhipu/deepseek/moonshotai 系及 opencode 官方免费系）；使用前需在 opencode 配置中启用对应 provider。",
+        "- 构建期以 balanced 档烘焙 agent 产物的 model 字段；安装后可通过 `budget setup agent preset <economic|balanced|quality>` 批量切换档位，`budget setup agent inherit` 跟随主会话模型。"
+      ],
+      "presets": {
+        "balanced": {
+          "architect": "zhipu/glm-5.2",
+          "coder_lite": "opencode/glm-5.3-flash-free",
+          "coder_senior": "deepseek/deepseek-v4-pro",
+          "coder_standard": "deepseek/deepseek-flash",
+          "director": "anthropic/claude-opus-4.7",
+          "goal_evaluator": "anthropic/claude-haiku-4.5",
+          "recorder": "opencode/glm-5.3-flash-free",
+          "reviewer": "deepseek/deepseek-v4-pro",
+          "reviewer_b": "moonshotai/kimi-k2.7",
+          "tester": "moonshotai/kimi-k2.7"
+        },
+        "economic": {
+          "architect": "deepseek/deepseek-v4-pro",
+          "coder_lite": "opencode/glm-5.3-flash-free",
+          "coder_senior": "deepseek/deepseek-v4-pro",
+          "coder_standard": "deepseek/deepseek-flash",
+          "director": "anthropic/claude-opus-4.6",
+          "goal_evaluator": "opencode/deepseek-v4.1-flash-free",
+          "recorder": "opencode/glm-5.3-flash-free",
+          "reviewer": "opencode/glm-5.3-flash-free",
+          "reviewer_b": "opencode/deepseek-v4.1-flash-free",
+          "tester": "opencode/glm-5.3-flash-free"
+        },
+        "quality": {
+          "architect": "anthropic/claude-opus-4.7",
+          "coder_lite": "deepseek/deepseek-flash",
+          "coder_senior": "anthropic/claude-sonnet-4.6",
+          "coder_standard": "deepseek/deepseek-v4-pro",
+          "director": "anthropic/claude-opus-4.7",
+          "goal_evaluator": "anthropic/claude-haiku-4.5",
+          "recorder": "anthropic/claude-haiku-4.5",
+          "reviewer": "moonshotai/kimi-k2.7",
+          "reviewer_b": "deepseek/deepseek-v4-pro",
+          "tester": "google/gemini-3.5-flash"
+        }
+      },
+      "unconfirmed_ids": [
+        "anthropic/claude-haiku-4.5",
+        "anthropic/claude-opus-4.6",
+        "anthropic/claude-opus-4.7",
+        "anthropic/claude-sonnet-4.6",
+        "google/gemini-3.5-flash",
+        "moonshotai/kimi-k2.7",
+        "zhipu/glm-5.2"
+      ]
+    }
+  },
+  "provider_map": {
+    "claude": "anthropic",
+    "deepseek": "deepseek",
+    "gemini": "google",
+    "glm": "zhipu",
+    "gpt": "openai",
+    "hunyuan": "opencode",
+    "kimi": "moonshotai",
+    "minimax": "minimax",
+    "opencode": "opencode"
+  },
+  "roles": [
+    "architect",
+    "coder_lite",
+    "coder_standard",
+    "coder_senior",
+    "reviewer",
+    "reviewer_b",
+    "tester",
+    "recorder",
+    "director",
+    "goal_evaluator"
+  ]
+}

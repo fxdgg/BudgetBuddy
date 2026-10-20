@@ -401,8 +401,8 @@ do_init() {
             budget_print_warning "未检测到已安装形态（BUDGET_GLOBAL=1 全局模式），仅执行全局初始化"
             budget_print_warning "hooks 注入与 superpowers 插件检测步骤将跳过"
         else
-            budget_print_error "未检测到 BudgetBuddy 安装形态（三级探测均未命中）"
-            budget_print_info "请先安装本套件，或设置 BUDGET_PLATFORM=codebuddy|opencode 显式指定平台"
+            budget_print_error "未检测到 BudgetBuddy 安装形态（多级探测均未命中）"
+            budget_print_info "请先安装本套件，或设置 BUDGET_PLATFORM=codebuddy|claudecode|opencode 显式指定平台"
             budget_print_info "或设置 BUDGET_GLOBAL=1 执行纯全局数据目录初始化"
             return 1
         fi
@@ -445,10 +445,11 @@ do_init() {
     if ! _budget_init_sync_lib "$global_dir/lib"; then
         return 1
     fi
-    # 管理面数据落位（opencode 任意形态 / codebuddy 全局 / BUDGET_GLOBAL=1；
-    # design.md §8.4 全局数据目录含 budget-models.json 与 personas.json）
+    # 管理面数据落位（opencode/claudecode 任意形态 / codebuddy 全局 /
+    # BUDGET_GLOBAL=1；design.md §8.4 全局数据目录含 budget-models.json 与
+    # personas.json——opencode 与 claudecode 管理面统一 ~/.budgetbuddy/，A3）
     local need_admin_data=false
-    if [[ "$platform_kind" == "opencode" \
+    if [[ "$platform_kind" == "opencode" || "$platform_kind" == "claudecode" \
           || ( "$platform_kind" == "codebuddy" && "$platform_scope" == "global" ) \
           || "${BUDGET_GLOBAL:-0}" == "1" ]]; then
         need_admin_data=true

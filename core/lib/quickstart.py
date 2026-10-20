@@ -27,7 +27,7 @@
 环境变量（setup.sh exec 时导出；直调时自行兜底探测）:
     BUDGET_SETUP_DIR  setup.sh 所在目录
     BUDGET_GLOBAL     "1" 全局模式
-    BUDGET_PLATFORM   显式平台（codebuddy|opencode，跳过探测）
+    BUDGET_PLATFORM   显式平台（codebuddy|claudecode|opencode，跳过探测）
     BUDGET_DIR        运行时数据目录覆盖
 """
 
@@ -139,7 +139,7 @@ _SETUP_SCRIPT = _locate_setup_script()
 _NON_INTERACTIVE = False  # main() 入口按参数与 tty 检测设置
 _TOTAL_STEPS = 8
 
-# ─── 平台探测（语义对齐 lib/platform.sh 三分支；纯只读文件系统检查）─────────
+# ─── 平台探测（语义对齐 lib/platform.sh 五分支；纯只读文件系统检查）─────────
 
 _SUITE_AGENTS = (
     'architect', 'coder-lite', 'coder-standard', 'coder-senior', 'reviewer',
@@ -170,13 +170,18 @@ def _walk_up(predicate: Callable[[str], bool], max_levels: int = 10):
 
 
 def _detect_platform() -> dict:
-    """运行时平台探测（对齐 platform.sh：BUDGET_PLATFORM 显式 > codebuddy
-    项目级 > codebuddy 全局 > opencode 项目级 > opencode 全局 > unknown）。"""
+    """运行时平台探测（对齐 platform.sh 五分支：BUDGET_PLATFORM 显式 >
+    codebuddy 项目级 > codebuddy 全局 > claudecode 项目级 > claudecode
+    全局 > opencode 项目级 > opencode 全局 > unknown）。"""
     result = {'kind': 'unknown', 'scope': '', 'root': '', 'agents_dir': ''}
     explicit = os.environ.get('BUDGET_PLATFORM', '')
     if explicit == 'codebuddy':
         result.update(kind='codebuddy', scope='global',
                       agents_dir=os.path.join(_HOME, '.codebuddy', 'agents'))
+        return result
+    if explicit == 'claudecode':
+        result.update(kind='claudecode', scope='global',
+                      agents_dir=os.path.join(_HOME, '.claude', 'agents'))
         return result
     if explicit == 'opencode':
         result.update(kind='opencode', scope='global',
@@ -191,6 +196,15 @@ def _detect_platform() -> dict:
     if os.path.isfile(os.path.join(_HOME, '.codebuddy', 'setup.sh')):
         result.update(kind='codebuddy', scope='global',
                       agents_dir=os.path.join(_HOME, '.codebuddy', 'agents'))
+        return result
+    root = _walk_up(lambda d: _has_suite_agents(os.path.join(d, '.claude', 'agents')))
+    if root:
+        result.update(kind='claudecode', scope='project', root=root,
+                      agents_dir=os.path.join(root, '.claude', 'agents'))
+        return result
+    if _has_suite_agents(os.path.join(_HOME, '.claude', 'agents')):
+        result.update(kind='claudecode', scope='global',
+                      agents_dir=os.path.join(_HOME, '.claude', 'agents'))
         return result
     root = _walk_up(lambda d: _has_suite_agents(os.path.join(d, '.opencode', 'agent')))
     if root:
@@ -417,7 +431,7 @@ def _print_step(step_num: int, title: str) -> None:
 
 
 def step1_welcome() -> None:
-    """欢迎页：banner + 项目简介（多 Agent 省钱工作流、双平台支持）。"""
+    """欢迎页：banner + 项目简介（多 Agent 省钱工作流、三平台支持）。"""
     print(_box_top())
     print(_box_empty())
     print(_box_center(f'{BOLD}BudgetBuddy 快速上手向导{NC}'))
@@ -429,7 +443,7 @@ def step1_welcome() -> None:
     print(f'  {CYAN}·{NC} 多 Agent 省钱工作流 — 10 个专职 Agent（架构 / 分级编码 / 双审 / 测试 / 终裁）协作交付')
     print(f'  {CYAN}·{NC} 模型分级调度 — economic / balanced / quality 三档预设，按角色匹配高性价比模型')
     print(f'  {CYAN}·{NC} 五阶段质量闸门 — 方案设计 → 评审 → 开发 → 终审 → 归档，全程 Review Gate')
-    print(f'  {CYAN}·{NC} 双平台支持 — CodeBuddy 与 OpenCode 共用一套配置，改一处双平台生效')
+    print(f'  {CYAN}·{NC} 三平台支持 — CodeBuddy / OpenCode / Claude Code 共用一套配置，改一处多平台生效')
     print()
     print(f'本向导共 {_TOTAL_STEPS} 步，每步均可跳过（直接回车取默认值，Ctrl-C 随时退出）。')
 
@@ -450,8 +464,8 @@ def step2_environment_check() -> None:
     """环境检查：平台探测展示 + openspec/git/python3 依赖检查。"""
     platform = _detect_platform()
     if platform['kind'] == 'unknown':
-        print(f'{YELLOW}[!]{NC} 未检测到 BudgetBuddy 安装形态（三级探测均未命中）')
-        print('    可设置 BUDGET_PLATFORM=codebuddy|opencode 显式指定，或先运行 budget setup init')
+        print(f'{YELLOW}[!]{NC} 未检测到 BudgetBuddy 安装形态（多级探测均未命中）')
+        print('    可设置 BUDGET_PLATFORM=codebuddy|claudecode|opencode 显式指定，或先运行 budget setup init')
     else:
         root_note = f'（root: {platform["root"]}）' if platform['root'] else ''
         print(f'{CYAN}[i]{NC} 运行平台: {platform["kind"]}:{platform["scope"]}{root_note}')
@@ -616,6 +630,7 @@ def step7_workflow_demo() -> None:
     print()
     print(f'  在 {CYAN}CodeBuddy{NC} 主会话输入:  {CYAN}/budget:start <你的需求描述>{NC}')
     print(f'  在 {CYAN}OpenCode{NC} 主会话输入:   {CYAN}/budget-start <你的需求描述>{NC}')
+    print(f'  在 {CYAN}Claude Code{NC} 主会话输入: {CYAN}/budget:start <你的需求描述>{NC}')
     print()
     print('  示例: /budget:start 实现一个用户登录模块，要求支持密码与验证码两种方式')
     print()
@@ -628,7 +643,7 @@ def step7_workflow_demo() -> None:
     print(f'  {CYAN}Phase 5{NC}  归档沉淀   recorder 归档变更并提取经验')
     print()
     print(f'  长期目标模式（Goal Loop）用 {CYAN}/budget:goal{NC} 启动，追加 Phase 6 目标验证循环。')
-    print(f'  运行中随时用 {CYAN}/budget:status{NC} 查看进度（OpenCode: /budget-status）。')
+    print(f'  运行中随时用 {CYAN}/budget:status{NC} 查看进度（OpenCode: /budget-status；Claude Code 同 CodeBuddy）。')
     print()
 
 # ─── 步骤 8/8: 完成页 ──────────────────────────────────────────────────────
@@ -643,7 +658,7 @@ def step8_completion() -> None:
     print(_box_bottom(GREEN))
     print()
     print('后续步骤：')
-    print(f'  {GREEN}1.{NC} {CYAN}/budget:start <需求描述>{NC} 开始你的第一次工作流（OpenCode: /budget-start）')
+    print(f'  {GREEN}1.{NC} {CYAN}/budget:start <需求描述>{NC} 开始你的第一次工作流（OpenCode: /budget-start；Claude Code 同 CodeBuddy）')
     print(f'  {GREEN}2.{NC} {CYAN}budget setup help{NC} 查看全部管理命令')
     print(f'  {GREEN}3.{NC} {CYAN}budget status{NC} 查看运行状态与配置概览')
     print(f'  {GREEN}4.{NC} {CYAN}budget setup quickstart{NC} 随时重跑本向导（别名 tour / wizard）')

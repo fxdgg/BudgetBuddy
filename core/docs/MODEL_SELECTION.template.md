@@ -7,7 +7,7 @@
 
 {{models_table}}
 
-## 预设总览（三档 × 双平台）
+## 预设总览（三档 × 全部平台）
 
 {{preset_table}}
 
@@ -21,4 +21,4 @@
 - **成本梯度不可倒挂**：coder_senior > coder_standard > coder_lite（任何预设均满足）。
 - **审查与编码尽量不同厂商**：减少「自己写自己审」的同系盲区。
 - **简写别名**：`budget setup agent custom <alias>` 支持简写（如 `opus`/`kimi`/`glm`），自动解析为标准 ID 后统一覆写。
-- **待确认标注**：OpenCode 侧未能核对的 provider/model ID 在 `budget-models.json` 的 `_meta.unconfirmed_opencode_ids` 中列出，上线前须逐一核对清零。
+- **待确认标注**：各平台未能核对的 provider/model ID 在 `budget-models.json` 的 `platforms.<平台>.unconfirmed_ids` 中列出，上线前须逐一核对清零。

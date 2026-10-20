@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""BudgetBuddy 构建系统：core/ 中立源 → dist/<platform>/ 双平台产物。
+"""BudgetBuddy 构建系统：core/ 中立源 → dist/<platform>/ 平台产物（平台清单构建期
+由 core/platform/*.yaml 枚举，数据驱动，非硬编码元组）。
 
 流程（design.md §4）：
 1. 解析 core/platform/<platform>.yaml（手写 YAML 子集解析器，§12-A5）并校验 DSL schema（§3.5）；
@@ -21,7 +22,7 @@ YAML 子集语法（§12-A5）：两空格缩进嵌套 map、块式 list（- ite
 单/双引号与裸标量（含引号内冒号与值后行内注释）、空字符串 ""、null、
 # 注释；不支持锚点/别名/tag/多行字符串/文档分隔符（显式报错含行号）。
 
-用法：python3 scripts/build.py [--platform codebuddy|opencode] [--check] [--strict] [--root DIR]
+用法：python3 scripts/build.py [--platform <platform>] [--check] [--strict] [--root DIR]
 退出码：0=成功；1=构建/校验/门禁失败；2=内部错误。
 """
 
@@ -58,9 +59,6 @@ _VENDOR_ORDER = ('claude', 'gemini', 'gpt', 'kimi', 'glm', 'minimax', 'deepseek'
 
 # 模型条目 tier 合法枚举（对齐 budget-models.schema.json）。
 _MODEL_TIERS = frozenset(('top', 'mid', 'light', 'budget', 'free'))
-
-# 模型条目 platform 合法枚举（双平台标识）。
-_MODEL_PLATFORMS = frozenset(('codebuddy', 'opencode'))
 
 # §7 opencode 预设 provider 白名单（官方六系 + opencode 官方免费网关）。
 OPENCODE_PROVIDERS = frozenset((
@@ -944,10 +942,13 @@ def _ordered_vendors(groups: dict) -> list[str]:
     return known + extra
 
 
-def _validate_model_entry(entry: object, label: str, seen: dict[str, str]) -> None:
+def _validate_model_entry(entry: object, label: str, seen: dict[str, str],
+                          valid_platforms: frozenset[str]) -> None:
     """校验单个模型条目（id/tier/cost/tags/platform），违规抛 BuildError。
 
     seen 为「模型 ID → 首次出现位置标签」映射，用于重复 ID 报错定位。
+    valid_platforms 为合法 platform 取值集合（由 budget-models.json 的
+    platforms 键集推导，数据内自洽校验——条目 platform 值须 ∈ 该键集）。
     """
     if not isinstance(entry, dict):
         raise BuildError(f'{label}: 模型条目必须是对象')
@@ -969,22 +970,30 @@ def _validate_model_entry(entry: object, label: str, seen: dict[str, str]) -> No
     if not isinstance(tags, list) or any(not isinstance(tag, str) or not tag for tag in tags):
         raise BuildError(f'{label}: tags 必须是非空字符串数组')
     entry_platforms = entry['platform']
-    if (not isinstance(entry_platforms, list) or not entry_platforms
-            or any(item not in _MODEL_PLATFORMS for item in entry_platforms)):
+    if not isinstance(entry_platforms, list) or not entry_platforms:
+        raise BuildError(f'{label}: platform 须为非空数组')
+    # 键集为空视为数据未就位（只校验已有键），跳过枚举校验。
+    if valid_platforms and any(item not in valid_platforms for item in entry_platforms):
         raise BuildError(
-            f'{label}: platform 须为非空数组且取值 ∈ {sorted(_MODEL_PLATFORMS)}')
+            f'{label}: platform 取值须 ∈ budget-models.json platforms 键集'
+            f'（合法键集: {sorted(valid_platforms)}）')
 
 
 def _validate_preset_value(value: object, platform: str, catalog: dict[str, list],
                            label: str) -> None:
-    """校验预设值：codebuddy 为目录 ID；opencode 为 provider/model 且 model ∈ 目录。"""
+    """校验预设值：默认 catalog_id 策略；opencode 特判 provider/model 格式。
+
+    默认策略（除 opencode 外的全部平台，claudecode 及后续平台零代码接入）：
+    值 ∈ 模型目录且该条目 platform 数组含本平台；opencode 单平台分支保留
+    provider/model 形态与 provider 白名单校验（策略集合稳定，收敛于此）。
+    """
     if not isinstance(value, str) or not value:
         raise BuildError(f'{label}: 预设值必须是非空字符串')
-    if platform == 'codebuddy':
+    if platform != 'opencode':
         if value not in catalog:
             raise BuildError(f'{label}: 预设值 {value} 不在模型目录中')
-        if 'codebuddy' not in catalog[value]:
-            raise BuildError(f'{label}: 预设值 {value} 的 platform 不含 codebuddy')
+        if platform not in catalog[value]:
+            raise BuildError(f'{label}: 预设值 {value} 的 platform 不含 {platform}')
         return
     if _OPENCODE_ID_PATTERN.fullmatch(value) is None:
         raise BuildError(f'{label}: opencode 预设值须为 provider/model 格式（当前 {value}）')
@@ -1002,6 +1011,8 @@ def validate_models_data(data: dict, path: str) -> dict:
 
     数据就位后构建期全量校验（D §4 降级规则的恢复面：models 存在即生效）；
     校验通过返回原数据，违规抛 BuildError（消息含定位标签）。
+    平台清单数据驱动：条目 platform 合法域与预设三档校验循环均遍历
+    data['platforms'] 键集（数据内自洽，非硬编码枚举）。
     provider_map 构建期必含且须覆盖 models.paid/free 全部组名（schema 侧
     optional 仅兼容用户旧配置；T10a agent custom 别名解析依赖该映射）。
     """
@@ -1030,6 +1041,12 @@ def validate_models_data(data: dict, path: str) -> dict:
     if not isinstance(roles, list) or sorted(roles) != sorted(MODEL_ROLES):
         raise BuildError(
             f'{path}: roles 必须恰为十角色键集合（期望 {list(MODEL_ROLES)}，实际 {roles}）')
+    # platforms 键集前置提取（条目 platform 合法域与预设校验循环的数据源；
+    # 键集为空视为数据未就位——条目枚举校验跳过、预设循环只校验已有键）。
+    platforms = data['platforms']
+    if not isinstance(platforms, dict):
+        raise BuildError(f'{path}: platforms 必须是对象')
+    platform_keys = frozenset(platforms)
     models = data['models']
     if not isinstance(models, dict):
         raise BuildError(f'{path}: models 必须是对象')
@@ -1048,7 +1065,7 @@ def validate_models_data(data: dict, path: str) -> dict:
                 raise BuildError(f'{path}: models.{section}.{vendor} 必须是数组')
             for entry in entries:
                 label = f'{path}: models.{section}.{vendor}'
-                _validate_model_entry(entry, label, seen)
+                _validate_model_entry(entry, label, seen, platform_keys)
                 catalog[entry['id']] = list(entry['platform'])
     provider_map = data.get('provider_map')
     if not isinstance(provider_map, dict):
@@ -1060,15 +1077,26 @@ def validate_models_data(data: dict, path: str) -> dict:
     if missing_vendors:
         raise BuildError(
             f'{path}: provider_map 缺少厂商组 {missing_vendors}（agent custom 别名解析需全覆盖）')
-    platforms = data['platforms']
-    if not isinstance(platforms, dict):
-        raise BuildError(f'{path}: platforms 必须是对象')
-    for platform in ('codebuddy', 'opencode'):
-        if platform not in platforms:
-            raise BuildError(f'{path}: platforms 缺少 {platform}')
+    for platform in platforms:
         platform_data = platforms[platform]
         if not isinstance(platform_data, dict):
             raise BuildError(f'{path}: platforms.{platform} 必须是对象')
+        # 可选键 note/unconfirmed_ids（D1-3 平台说明数据驱动；缺失走常量回退，
+        # 文案数据迁移统一在 add-claudecode-platform 任务 2.2 落地）。
+        # 空数组语义统一禁止：键存在则必须非空（与 schema minItems=1 对齐，
+        # 无待确认项/无说明时直接省略键，而非写空数组占位）。
+        note = platform_data.get('note')
+        if note is not None and (
+                not isinstance(note, list)
+                or not note
+                or any(not isinstance(line, str) or not line for line in note)):
+            raise BuildError(f'{path}: platforms.{platform}.note 必须是非空字符串数组')
+        unconfirmed = platform_data.get('unconfirmed_ids')
+        if unconfirmed is not None and (
+                not isinstance(unconfirmed, list)
+                or not unconfirmed
+                or any(not isinstance(item, str) or not item for item in unconfirmed)):
+            raise BuildError(f'{path}: platforms.{platform}.unconfirmed_ids 必须是非空字符串数组')
         presets = platform_data.get('presets')
         if not isinstance(presets, dict):
             raise BuildError(f'{path}: platforms.{platform}.presets 必须是对象')
@@ -1109,10 +1137,12 @@ def _render_models_table(models_data: dict) -> str:
 
 
 def _render_preset_table(models_data: dict) -> str:
-    """生成双平台三档预设表（A6：角色按 roles 序、档位 economic/balanced/quality）。"""
+    """生成各平台三档预设表（A6：角色按 roles 序、档位 economic/balanced/quality、
+    平台列按 platforms 键序——JSON 插入序，确定性由源文件保证）。"""
     roles = models_data['roles']
+    platforms = models_data['platforms']
     header = ['角色']
-    for platform in ('codebuddy', 'opencode'):
+    for platform in platforms:
         for preset in PRESET_NAMES:
             header.append(f'{platform} {preset}')
     lines = [
@@ -1121,14 +1151,16 @@ def _render_preset_table(models_data: dict) -> str:
     ]
     for role in roles:
         row = [role]
-        for platform in ('codebuddy', 'opencode'):
+        for platform in platforms:
             for preset in PRESET_NAMES:
                 row.append(models_data['platforms'][platform]['presets'][preset][role])
         lines.append('| ' + ' | '.join(row) + ' |')
     return '\n'.join(lines)
 
 
-# A6 平台说明段静态部分（{{platform_note}} 渲染数据源，按平台取用）。
+# A6 平台说明段常量回退文案（{{platform_note}} 渲染在 platforms.<p>.note 缺失时
+# 沿用，保证数据迁移前双平台产物逐字节不变；文案初值迁移统一在
+# add-claudecode-platform 任务 2.2 与 models 数据扩展同批落地）。
 _PLATFORM_NOTE_LINES = {
     'codebuddy': (
         '- 本平台预设值为 CodeBuddy 原生模型 ID（kebab-case）；构建期以 balanced 档'
@@ -1147,16 +1179,38 @@ _PLATFORM_NOTE_LINES = {
 }
 
 
+def _platform_unconfirmed_ids(models_data: dict, platform: str) -> list[str]:
+    """读取平台待确认 ID 清单：platforms.<p>.unconfirmed_ids 优先；opencode 兼容
+    读 _meta.unconfirmed_opencode_ids 旧键一个版本（新位置优先，旧键迁移在 2.2）。"""
+    platform_data = (models_data.get('platforms') or {}).get(platform) or {}
+    value = platform_data.get('unconfirmed_ids')
+    if platform == 'opencode' and value is None:
+        value = (models_data.get('_meta') or {}).get('unconfirmed_opencode_ids')
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str) and item]
+    return []
+
+
 def _render_platform_note(models_data: dict, platform: str) -> str:
-    """生成平台说明段（opencode 附待确认 ID 清单，数据驱动、按目录序）。"""
-    lines = list(_PLATFORM_NOTE_LINES[platform])
-    if platform == 'opencode':
-        meta = models_data.get('_meta') or {}
-        unconfirmed = meta.get('unconfirmed_opencode_ids') or []
-        if unconfirmed:
-            lines.append(
-                '- 以下预设 ID 未经本机 opencode 环境核对（待确认，上线前必须清零）：'
-                + '、'.join(unconfirmed))
+    """生成平台说明段（数据驱动 + 常量回退；unconfirmed_ids 非空的平台附待确认清单）。
+
+    note 取 platforms.<p>.note（字符串数组）；缺失时回退 _PLATFORM_NOTE_LINES
+    常量文案；两者皆无则告警并输出空说明段（防 KeyError 崩溃）。
+    """
+    platform_data = (models_data.get('platforms') or {}).get(platform) or {}
+    note = platform_data.get('note')
+    if isinstance(note, list) and note:
+        lines = list(note)
+    elif platform in _PLATFORM_NOTE_LINES:
+        lines = list(_PLATFORM_NOTE_LINES[platform])
+    else:
+        warn(f'platforms.{platform}.note 缺失且无常量回退文案，平台说明段为空')
+        lines = []
+    unconfirmed = _platform_unconfirmed_ids(models_data, platform)
+    if unconfirmed:
+        lines.append(
+            f'- 以下预设 ID 未经本机 {platform} 环境核对（待确认，上线前必须清零）：'
+            + '、'.join(unconfirmed))
     return '\n'.join(lines)
 
 
@@ -1654,12 +1708,54 @@ def build_platform(root: Path, platform: str, strict: bool = False) -> None:
 # CLI
 # ---------------------------------------------------------------------------
 
+def discover_platforms(root: Path) -> list[str]:
+    """构建期枚举平台清单：glob core/platform/*.yaml（按名称排序，确定性）。"""
+    platform_dir = root / 'core' / 'platform'
+    if not platform_dir.is_dir():
+        raise BuildError(f'缺少平台 DSL 目录: {platform_dir}')
+    platforms = sorted(path.stem for path in platform_dir.glob('*.yaml'))
+    if not platforms:
+        raise BuildError(f'{platform_dir} 下无平台 DSL 文件（core/platform/*.yaml）')
+    return platforms
+
+
+def _check_platform_lists_consistency(root: Path, yaml_platforms: list[str]) -> None:
+    """双清单一致性校验（D1）：core/platform/*.yaml 集合 == models.json platforms 键集。
+
+    models 缺失（降级路径 D §4）或 platforms 键集为空（数据未就位）时跳过；
+    双向不一致显式报错并列出两侧差异，不静默跳过任一平台（消除 glob 与
+    数据两真值源漂移）。
+    """
+    models_path = root / 'core' / 'models' / 'budget-models.json'
+    if not models_path.is_file():
+        return
+    try:
+        data = json.loads(models_path.read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise BuildError(f'core/models/budget-models.json 读取或解析失败: {exc}') from exc
+    if not isinstance(data, dict):
+        raise BuildError('core/models/budget-models.json 顶层必须是对象')
+    platforms = data.get('platforms')
+    if not isinstance(platforms, dict) or not platforms:
+        return  # platforms 键集为空：数据未就位，只校验已有键（跳过一致性）。
+    only_yaml = sorted(set(yaml_platforms) - platforms.keys())
+    only_data = sorted(platforms.keys() - set(yaml_platforms))
+    if only_yaml or only_data:
+        raise BuildError(
+            f'平台双清单不一致: core/platform/*.yaml 独有 {only_yaml}，'
+            f'budget-models.json platforms 键集独有 {only_data}（两侧必须一致）')
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
-    """解析命令行参数。"""
-    parser = argparse.ArgumentParser(description='BudgetBuddy 构建系统：core/ → dist/ 双平台转换')
+    """解析命令行参数。
+
+    --platform 合法域不在 argparse choices 固化（choices 依赖 --root 指向的
+    仓库，构建启动时由 main 依 core/platform/*.yaml 枚举结果动态校验）。
+    """
+    parser = argparse.ArgumentParser(description='BudgetBuddy 构建系统：core/ → dist/ 平台产物转换')
     parser.add_argument(
-        '--platform', choices=('codebuddy', 'opencode'), default=None,
-        help='仅构建指定平台（默认双平台）')
+        '--platform', default=None, metavar='<platform>',
+        help='仅构建指定平台（可用平台由 core/platform/*.yaml 枚举，默认构建全部平台）')
     parser.add_argument('--check', action='store_true', help='构建成功后运行品牌门禁 scan-brand.py')
     parser.add_argument('--strict', action='store_true', help='将 P0 一致性告警升级为失败（CI 用）')
     parser.add_argument('--root', default=None, help='仓库根目录（默认：本脚本上两级）')
@@ -1686,7 +1782,13 @@ def main(argv: list[str] | None = None) -> int:
     """执行构建，返回进程退出码（0=成功）。"""
     args = parse_args(argv)
     root = resolve_root(args.root)
-    platforms = [args.platform] if args.platform else ['codebuddy', 'opencode']
+    available = discover_platforms(root)
+    if args.platform is not None and args.platform not in available:
+        raise BuildError(
+            f'未知平台 {args.platform}（可用平台: {available}，'
+            '平台清单由 core/platform/*.yaml 枚举）')
+    _check_platform_lists_consistency(root, available)
+    platforms = [args.platform] if args.platform else available
     for platform in platforms:
         build_platform(root, platform, strict=args.strict)
     if args.check:

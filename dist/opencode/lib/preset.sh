@@ -7,7 +7,9 @@
 #   - do_diff（T9c update.sh）所需查询函数：budget_get_current_models /
 #     budget_preset_table（输出契约见函数注释）
 # frontmatter 解析与写回统一由 lib/model_resolver.py 承担（YAML 安全），
-# shell 仅做编排与结果呈现。
+# shell 仅做编排与结果呈现。claudecode 形态下 frontmatter 为 camelCase 键
+# 结构（permissionMode/maxTurns 等），model 键名与中立源一致——重写仅触碰
+# model 一行，camelCase 键无损（specs/model-presets「预设切换与角色覆写」）。
 # 依赖调用方（setup.sh）提供：$BUDGET_PYTHON、$BUDGET_LIB_DIR、
 # $BUDGET_MODELS_FILE、detect_platform（platform.sh）、budget_print_*（colors.sh）。
 
@@ -25,7 +27,7 @@ setup_agent() {
     detect_platform >/dev/null || true
     if [[ "${BUDGET_PLATFORM_KIND:-unknown}" == "unknown" ]]; then
         budget_print_error "未检测到已安装的 BudgetBuddy 平台形态，无法定位 agent 目录"
-        budget_print_info "提示：可设置 BUDGET_PLATFORM=codebuddy|opencode 显式指定平台"
+        budget_print_info "提示：可设置 BUDGET_PLATFORM=codebuddy|claudecode|opencode 显式指定平台"
         return 1
     fi
     if [[ -z "${BUDGET_AGENTS_DIR:-}" || ! -d "${BUDGET_AGENTS_DIR}" ]]; then

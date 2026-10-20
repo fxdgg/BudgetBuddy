@@ -2,7 +2,7 @@
 
 **中文** | [English](README.md) | [变更日志](CHANGELOG.md) | [许可协议](LICENSE)
 
-BudgetBuddy 是一套多 Agent 省钱研发工作流。它把每个任务路由到「对的 sub-agent + 对的模型」：简单任务消耗廉价 token，只有硬任务才消耗昂贵 token。单一中立源（`core/`）构建出 **CodeBuddy** 与 **OpenCode** 双平台产物；其他 agent 平台可通过扩展构建 DSL（`core/platform/*.yaml`）接入。
+BudgetBuddy 是一套多 Agent 省钱研发工作流。它把每个任务路由到「对的 sub-agent + 对的模型」：简单任务消耗廉价 token，只有硬任务才消耗昂贵 token。单一中立源（`core/`）构建出 **CodeBuddy**、**OpenCode** 与 **Claude Code** 三平台产物；其他 agent 平台可通过扩展构建 DSL（`core/platform/*.yaml`）接入。
 
 ## BudgetBuddy 是什么？
 
@@ -20,7 +20,7 @@ BudgetBuddy 是一套多 Agent 省钱研发工作流。它把每个任务路由�
 - **Coder Guard 护栏** — 按 coder × 任务标签记录最近 5 次成败；失败 ≥2 次自动触发分级降级
 - **Goal Loop** — 目标驱动宏循环：定义目标 → 跑 pipeline → 验证 → 未达标则迭代（最多 8 轮，含安全边界）
 - **openspec 变更管理** — propose / apply / archive / explore 命令 + 规格驱动的变更跟踪
-- **双平台构建** — 单一 `core/` 源，`scripts/build.py` 产出 `dist/codebuddy/` 与 `dist/opencode/`
+- **多平台构建** — 单一 `core/` 源，`scripts/build.py` 产出 `dist/codebuddy/`、`dist/opencode/` 与 `dist/claudecode/`
 - **Superpowers 集成** — 在正确阶段引用质量实践 skill（TDD、系统化调试）；插件缺失时优雅降级
 
 ## 安装
@@ -33,10 +33,12 @@ curl -fsSL https://raw.githubusercontent.com/fxdgg/BudgetBuddy/main/install.sh |
 
 > ⚠️ **信任边界**：`curl | bash` 会以你的权限执行远端脚本。建议先审查脚本（`curl -fsSL https://raw.githubusercontent.com/fxdgg/BudgetBuddy/main/install.sh | less`）再执行。安装器下载 release zip 后**强制 SHA256 校验**——校验失败即中止，绝不安装损坏的包。
 
-交互模式会询问平台（CodeBuddy / OpenCode / 两者）与作用域（项目 / 全局）。非交互：
+交互模式会询问平台（CodeBuddy / OpenCode / Claude Code / 全部）与作用域（项目 / 全局）。非交互——`BUDGET_PLATFORM` 取值 `codebuddy` / `opencode` / `claudecode` / `both` / `all`（`all` = 三平台全部安装【推荐】；`both` = CodeBuddy + OpenCode，历史兼容值）：
 
 ```bash
 BUDGET_PLATFORM=opencode BUDGET_GLOBAL=1 bash install.sh   # OpenCode 全局安装
+BUDGET_PLATFORM=claudecode BUDGET_GLOBAL=1 bash install.sh # Claude Code 全局安装
+BUDGET_PLATFORM=all bash install.sh                        # 三平台全部安装（推荐）
 ```
 
 ### 手动安装
@@ -53,9 +55,11 @@ bash install.sh
 |------|-------------|--------|
 | CodeBuddy | `.codebuddy/`（项目级）或 `~/.codebuddy/`（全局） | `~/.budgetbuddy/` |
 | OpenCode | `.opencode/`（项目级）或 `~/.config/opencode/`（全局） | `~/.budgetbuddy/` |
+| Claude Code | `.claude/`（项目级）或 `~/.claude/`（全局） | `~/.budgetbuddy/` |
 
 - **CodeBuddy**：agents/rules/skills/commands 落入 `.codebuddy/`；hooks 注入 `settings.json`（注入前备份）并自动启用 Superpowers 插件；`budget` CLI 写入 `~/.local/bin/budget`。
 - **OpenCode**：agents/commands/skills 落入 OpenCode 目录；rules 以标记区块形式合并进 `AGENTS.md`；hooks 无原生等价物——插件扩展点见 `core/docs/opencode-setup-notes.md`。
+- **Claude Code**：agents/commands/skills 落入 `.claude/`（项目级）或 `~/.claude/`（全局）；rules 以标记区块形式合并进 `CLAUDE.md`（项目根或 `~/.claude/CLAUDE.md`）；管理面与 OpenCode 共享 `~/.budgetbuddy/`；hooks 首发不注入——通知经 `budget notify` CLI 降级提供。
 - Windows：请使用 Git Bash 或 WSL（PowerShell 会把 `curl` 别名为 `Invoke-WebRequest`）。
 - 项目级与全局级安装可共存；项目级优先。
 
@@ -73,24 +77,32 @@ bash install.sh
 /budget-start "新增用户登录 API，JWT 鉴权"
 ```
 
+### Claude Code
+
+```
+/budget:start "新增用户登录 API，JWT 鉴权"
+```
+
+项目级安装将 agents/commands/skills 落入 `.claude/`，rules 以标记区块合并进 `CLAUDE.md`；全局安装落入 `~/.claude/`（对应 `~/.claude/CLAUDE.md`）。⚠️ Claude Code 首发不支持 hooks 通知——请改用 `budget notify "<消息>" <事件名>` 发送通知。
+
 Leader 会分析需求，依次调度 architect → 双 reviewer → 分级 coder → tester → 复审 → recorder，最后汇报结果。目标驱动迭代：
 
 ```
-/budget:goal "持续改进直到全部测试通过且覆盖率 >= 80%"   # CodeBuddy
+/budget:goal "持续改进直到全部测试通过且覆盖率 >= 80%"   # CodeBuddy / Claude Code
 /budget-goal "持续改进直到全部测试通过且覆盖率 >= 80%"   # OpenCode
 ```
 
 ### 常用命令
 
-| 命令（CodeBuddy） | 命令（OpenCode） | 用途 |
-|------------------|------------------|------|
-| `/budget:start <需求>` | `/budget-start <需求>` | 启动五阶段工作流 |
-| `/budget:goal <目标>` | `/budget-goal <目标>` | 启动 / 恢复 Goal Loop |
-| `/budget:status` | `/budget-status` | 查询工作流进度 |
-| `/opsx:propose` | `/opsx-propose` | 发起一个新的 openspec 变更 |
-| `/opsx:apply` | `/opsx-apply` | 实施变更中的任务 |
-| `/opsx:archive` | `/opsx-archive` | 归档已完成的变更 |
-| `/opsx:explore` | `/opsx-explore` | 提案前探索想法 |
+| 命令（CodeBuddy） | 命令（OpenCode） | 命令（Claude Code） | 用途 |
+|------------------|------------------|--------------------|------|
+| `/budget:start <需求>` | `/budget-start <需求>` | `/budget:start <需求>` | 启动五阶段工作流 |
+| `/budget:goal <目标>` | `/budget-goal <目标>` | `/budget:goal <目标>` | 启动 / 恢复 Goal Loop |
+| `/budget:status` | `/budget-status` | `/budget:status` | 查询工作流进度 |
+| `/opsx:propose` | `/opsx-propose` | `/opsx:propose` | 发起一个新的 openspec 变更 |
+| `/opsx:apply` | `/opsx-apply` | `/opsx:apply` | 实施变更中的任务 |
+| `/opsx:archive` | `/opsx-archive` | `/opsx:archive` | 归档已完成的变更 |
+| `/opsx:explore` | `/opsx-explore` | `/opsx:explore` | 提案前探索想法 |
 
 自然语言触发（"开始开发"、"实现 XX 功能"、"修复 XX bug"）同样激活工作流。
 
@@ -163,6 +175,18 @@ flowchart TD
     GE -.->|"达成 — N11"| L
 ```
 
+### 构建与平台分发
+
+```mermaid
+flowchart LR
+    CORE["core/ — 单一中立源"] --> BP["scripts/build.py — core/platform/*.yaml"]
+    BP -->|"原子替换"| DIST["dist/ — codebuddy / opencode / claudecode"]
+    DIST --> INST["install.sh — 下载 + SHA256 校验 + 增量同步"]
+    INST --> CB["CodeBuddy — .codebuddy/ 或 ~/.codebuddy/"]
+    INST --> OC["OpenCode — .opencode/ 或 ~/.config/opencode/"]
+    INST --> CC["Claude Code — .claude/ 或 ~/.claude/"]
+```
+
 ### 核心规则
 
 - **Leader 绝不写代码** — 所有代码修改必须经分级 coder agent 执行，哪怕一行 typo
@@ -175,11 +199,15 @@ flowchart TD
 
 ## 模型预设
 
-| 预设 | 定位 | 典型形态 |
-|------|------|---------|
-| `economic` | 省钱模式 | 免费/廉价模型承担大部分角色；仅终裁用高级模型 |
-| `balanced` | 平衡（推荐） | 高价值模型给 architect/reviewer，中档给 coder，廉价给 tester/recorder |
-| `quality` | 质量模式 | 顶级模型给 architect/coder-senior/director，其余用强模型 |
+| 预设 | 定位 | 典型形态 | Claude Code 原生模型 | CodeBuddy 典型模型 | OpenCode 典型模型 |
+|------|------|---------|----------------------|--------------------|-------------------|
+| `economic` | 省钱模式 | 免费/廉价模型承担大部分角色；仅终裁用高级模型 | haiku 系（`claude-haiku-5-5`） | `deepseek-v4-flash` | `deepseek/deepseek-flash` |
+| `balanced` | 平衡（推荐） | 高价值模型给 architect/reviewer，中档给 coder，廉价给 tester/recorder | sonnet 系（`claude-sonnet-5-5`） | `deepseek-v4-flash` | `deepseek/deepseek-flash` |
+| `quality` | 质量模式 | 顶级模型给 architect/coder-senior/director，其余用强模型 | opus 系（`claude-opus-5-5`） | `deepseek-v4-pro` | `deepseek/deepseek-v4-pro` |
+
+> 典型模型取 `core/models/budget-models.json` 中各档 `coder_standard` 角色的模型 ID；完整三平台预设表在构建期生成到 `dist/<platform>/docs/MODEL_SELECTION.md`（另见 `budget setup models`）。
+>
+> Claude Code 三档预设的原生模型 ID 已于 2026-10-20 在真实 Claude Code 环境实测核对（Claude Code CLI 2.1.304，零告警）；可用 `budget setup agent custom` 覆写。
 
 ```bash
 budget setup agent preset economic    # 切换预设（重写 agent frontmatter）
@@ -188,7 +216,7 @@ budget setup agent inherit coder-lite            # 继承主面板模型
 budget setup show                     # 查看结果
 ```
 
-完整目录（模型、档位、成本、别名、双平台预设表）在构建期生成到 `dist/<platform>/docs/MODEL_SELECTION.md`。
+完整目录（模型、档位、成本、别名、三平台预设表）在构建期生成到 `dist/<platform>/docs/MODEL_SELECTION.md`。
 
 ## 消息通知
 
@@ -213,6 +241,7 @@ budget setup show                     # 查看结果
 - **11 个事件开关（N1–N11）** — 设计评审驳回、审查升级耗尽、循环超限、Director 介入、阶段流转、目标达成等
 - **投递语义** — markdown 消息体、每渠道 5 秒超时、任一成功即停、全部失败静默（绝不阻断工作流）
 - **安全** — 配置文件 `chmod 600`（仅 owner 可读）；webhook/secret 不经环境变量、命令行参数与日志传递；错误输出仅含脱敏后的主机名
+- **Claude Code** — hooks 通知首发不支持（不注入 hooks）；请通过 `budget notify "<消息>" <事件名>` 显式发送通知
 
 ## 目录结构
 
@@ -226,16 +255,17 @@ BudgetBuddy/
 │   ├── lib/               # 管理面模块（setup、状态机、guard、notify 等）
 │   ├── models/            # budget-models.json + schema
 │   ├── personas/          # 5 套 persona 主题
-│   ├── platform/          # codebuddy.yaml / opencode.yaml 映射 DSL
+│   ├── platform/          # codebuddy.yaml / claudecode.yaml / opencode.yaml 映射 DSL
 │   ├── rules/             # 12 条规则（3 条 P0 + 8 条代码规范 + rtk）
 │   ├── skills/            # budget-workflow、budget-notify、4 个 openspec skill
 │   └── setup.sh           # budget setup 入口
 ├── dist/                  # 构建产物（禁止手改）
 │   ├── codebuddy/
+│   ├── claudecode/
 │   └── opencode/
 ├── scripts/               # build.py、scan-brand.py、build-release.sh
 ├── tests/                 # 单元测试（python3 -m unittest）
-├── install.sh             # 双平台安装器
+├── install.sh             # 三平台安装器
 └── VERSION
 ```
 
@@ -243,6 +273,7 @@ BudgetBuddy/
 
 - **改 `core/`，绝不改 `dist/`** — `dist/` 是生成物；手改会被覆盖且过不了检查
 - **构建与门禁**：`python3 scripts/build.py --check`（`--strict` 可将告警升级为失败）
+- **多平台构建**：`python3 scripts/build.py [--platform <平台>]` — 合法平台列表在构建期由 `core/platform/*.yaml` 动态枚举（当前为 `codebuddy` / `claudecode` / `opencode`）；不带 `--platform` 默认构建全部平台
 - **品牌门禁**：`python3 scripts/scan-brand.py` — 扫描 `core/`、`dist/`、`scripts/`、`install.sh`、`README.md`、`README_CN.md`、`CHANGELOG.md` 中的违禁词（参照项目品牌词）；门禁必须 exit 0
 - **测试**：`python3 -m unittest discover -s tests`
 - **发布**：`bash scripts/build-release.sh` — 先跑检查、读取 `VERSION`、打包 `budgetbuddy-<version>.zip` + `.sha256`

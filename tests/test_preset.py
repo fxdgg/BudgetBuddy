@@ -2,10 +2,12 @@
 # -*- coding: utf-8 -*-
 """preset.sh / models.sh / model_resolver.py 单测（design.md §3.2/§7/§8.1/§8.3）。
 
-临时目录构造双平台安装形态（codebuddy 项目级/全局、opencode 项目级/全局），
-验证 preset/custom/inherit 三命令的 frontmatter 重写、角色名映射（连字符→
-下划线全 10 角色锁定，防未来新角色名静默失配）、provider_map 转换与未知
-角色报错；另覆盖 budget setup models 完整表格与 do_diff 查询函数契约。
+临时目录构造三平台安装形态（codebuddy 项目级/全局、opencode 项目级/全局、
+claudecode 项目级），验证 preset/custom/inherit 三命令的 frontmatter 重写、
+角色名映射（连字符→下划线全 10 角色锁定，防未来新角色名静默失配）、
+provider_map 转换与未知角色报错；claudecode 形态下 camelCase 键结构
+（permissionMode/maxTurns）无损（specs/model-presets「claudecode preset
+切换」）；另覆盖 budget setup models 完整表格与 do_diff 查询函数契约。
 """
 
 import json
@@ -68,6 +70,19 @@ max_turns: 35
 {name} 的正文内容（重写不得触碰）。
 '''
 
+# claudecode agent 产物 frontmatter 模板（camelCase 键结构，对齐 dist/claudecode）。
+CLAUDECODE_AGENT_TMPL = '''---
+name: {name}
+description: MUST BE USED — {name} 测试 agent。
+model: {model}
+tools: [Read, Write, Edit, Bash, Grep, Glob]
+permissionMode: acceptEdits
+maxTurns: 35
+---
+
+{name} 的正文内容（重写不得触碰）。
+'''
+
 
 def run_bash(script, cwd, home, env_extra=None):
     """在指定 cwd/HOME 下运行 bash 脚本（剥离 BUDGET_* 环境变量实现隔离）。"""
@@ -111,6 +126,26 @@ def read_model_field(path):
     return None
 
 
+def read_agent(path):
+    """读取 agent 文件 frontmatter 顶层键值映射（跳过嵌套缩进行）。
+
+    用于 camelCase 键结构断言（permissionMode/maxTurns 等无损校验）；
+    无 frontmatter 时返回空映射。
+    """
+    lines = path.read_text(encoding='utf-8').split('\n')
+    if not lines or lines[0].strip() != '---':
+        return {}
+    fields = {}
+    for line in lines[1:]:
+        if line.strip() == '---':
+            break
+        if line.startswith(' ') or ':' not in line:
+            continue
+        key, _, value = line.partition(':')
+        fields[key.strip()] = value.strip()
+    return fields
+
+
 def _copy_management_plane(root):
     """管理面落位：setup.sh + lib（基础层 + models/preset/resolver）+ models json。"""
     (root / 'lib').mkdir(parents=True)
@@ -142,6 +177,18 @@ def make_opencode_install(base, home, models=None):
         model = (models or {}).get(name, 'zhipu/glm-5.2')
         (agents / (name + '.md')).write_text(
             OPENCODE_AGENT_TMPL.format(name=name, model=model), encoding='utf-8')
+    return agents
+
+
+def make_claudecode_install(base, home, models=None):
+    """构造 claudecode 项目级安装形态（管理面 ~/.budgetbuddy/ + 项目 .claude/agents/）。"""
+    _copy_management_plane(home / '.budgetbuddy')
+    agents = base / '.claude' / 'agents'
+    agents.mkdir(parents=True)
+    for name in LOCKED_AGENTS:
+        model = (models or {}).get(name, 'claude-sonnet-4.6')
+        (agents / (name + '.md')).write_text(
+            CLAUDECODE_AGENT_TMPL.format(name=name, model=model), encoding='utf-8')
     return agents
 
 
@@ -675,6 +722,77 @@ class AgentCommandOpencodeGlobalEnvTests(SandboxTestCase):
         expected = expected_preset('opencode', 'economic')
         for agent in LOCKED_AGENTS:
             self.assertEqual(read_model_field(agents / (agent + '.md')), expected[agent])
+
+
+class AgentCommandClaudecodeTests(SandboxTestCase):
+    """claudecode 项目级端到端：camelCase 键结构下的 preset 重写验证。
+
+    specs/model-presets Scenario「claudecode preset 切换」：.claude/agents/
+    全部产物 model 重写为 quality 预设 ID，其余 camelCase 键（permissionMode/
+    maxTurns）与正文不受影响（diff 仅 model 行）。
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.agents = make_claudecode_install(self.tmp, self.home)
+        self.setup_sh = self.home / '.budgetbuddy' / 'setup.sh'
+
+    def _run(self, args, cwd=None):
+        script = 'bash "%s" agent %s' % (self.setup_sh, args)
+        return run_bash(script, cwd or self.tmp, self.home)
+
+    def test_preset_quality_rewrites_only_model_line(self):
+        """quality 重写后逐文件 diff 仅 model 行变化，camelCase 键无损。"""
+        before = {name: (self.agents / (name + '.md')).read_text(encoding='utf-8')
+                  for name in LOCKED_AGENTS}
+        proc = self._run('preset quality')
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        expected = expected_preset('claudecode', 'quality')
+        for agent in LOCKED_AGENTS:
+            path = self.agents / (agent + '.md')
+            after = path.read_text(encoding='utf-8')
+            before_lines = before[agent].split('\n')
+            after_lines = after.split('\n')
+            self.assertEqual(len(before_lines), len(after_lines), agent)
+            diff = [i for i, (old, new) in enumerate(zip(before_lines, after_lines))
+                    if old != new]
+            self.assertEqual(len(diff), 1, 'agent %s 变化行数 %s' % (agent, diff))
+            self.assertTrue(before_lines[diff[0]].startswith('model:'), agent)
+            self.assertEqual(after_lines[diff[0]], 'model: %s' % expected[agent], agent)
+            # camelCase 键与正文无损（read_agent 提取断言）。
+            fields = read_agent(path)
+            self.assertEqual(fields['name'], agent)
+            self.assertEqual(fields['permissionMode'], 'acceptEdits')
+            self.assertEqual(fields['maxTurns'], '35')
+            self.assertEqual(fields['tools'], '[Read, Write, Edit, Bash, Grep, Glob]')
+            self.assertIn('%s 的正文内容（重写不得触碰）。' % agent, after)
+            self.assertNotIn('model_role', after)
+            self.assertNotIn('permissions', after)
+
+    def test_preset_economic_rewrites_all_ten_agents(self):
+        """economic 档：10 agent model 值 = claudecode economic 预设映射。"""
+        proc = self._run('preset economic')
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        expected = expected_preset('claudecode', 'economic')
+        for agent in LOCKED_AGENTS:
+            self.assertEqual(read_model_field(self.agents / (agent + '.md')), expected[agent])
+
+    def test_preset_idempotent(self):
+        self._run('preset quality')
+        first = {name: (self.agents / (name + '.md')).read_text(encoding='utf-8')
+                 for name in LOCKED_AGENTS}
+        proc = self._run('preset quality')
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        second = {name: (self.agents / (name + '.md')).read_text(encoding='utf-8')
+                  for name in LOCKED_AGENTS}
+        self.assertEqual(first, second)
+
+    def test_inherit_removes_model_field(self):
+        proc = self._run('inherit')
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        for agent in LOCKED_AGENTS:
+            self.assertIsNone(read_model_field(self.agents / (agent + '.md')),
+                              'agent %s 仍残留 model 字段' % agent)
 
 
 class DiffQueryFunctionsTests(SandboxTestCase):

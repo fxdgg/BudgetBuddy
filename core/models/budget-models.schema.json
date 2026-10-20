@@ -2,6 +2,105 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
+    "claudecodeModelId": {
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9.-]*$",
+      "type": "string"
+    },
+    "claudecodePresets": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "presets": {
+          "additionalProperties": false,
+          "properties": {
+            "balanced": {
+              "$ref": "#/definitions/claudecodeRoleMap"
+            },
+            "economic": {
+              "$ref": "#/definitions/claudecodeRoleMap"
+            },
+            "quality": {
+              "$ref": "#/definitions/claudecodeRoleMap"
+            }
+          },
+          "required": [
+            "economic",
+            "balanced",
+            "quality"
+          ],
+          "type": "object"
+        },
+        "unconfirmed_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "presets"
+      ],
+      "type": "object"
+    },
+    "claudecodeRoleMap": {
+      "additionalProperties": false,
+      "description": "model_role → Claude Code 模型 ID（须覆盖全部 10 个角色键，值为目录中的 claude 系模型 ID）",
+      "properties": {
+        "architect": {
+          "$ref": "#/definitions/claudecodeModelId"
+        },
+        "coder_lite": {
+          "$ref": "#/definitions/claudecodeModelId"
+        },
+        "coder_senior": {
+          "$ref": "#/definitions/claudecodeModelId"
+        },
+        "coder_standard": {
+          "$ref": "#/definitions/claudecodeModelId"
+        },
+        "director": {
+          "$ref": "#/definitions/claudecodeModelId"
+        },
+        "goal_evaluator": {
+          "$ref": "#/definitions/claudecodeModelId"
+        },
+        "recorder": {
+          "$ref": "#/definitions/claudecodeModelId"
+        },
+        "reviewer": {
+          "$ref": "#/definitions/claudecodeModelId"
+        },
+        "reviewer_b": {
+          "$ref": "#/definitions/claudecodeModelId"
+        },
+        "tester": {
+          "$ref": "#/definitions/claudecodeModelId"
+        }
+      },
+      "required": [
+        "architect",
+        "coder_lite",
+        "coder_standard",
+        "coder_senior",
+        "reviewer",
+        "reviewer_b",
+        "tester",
+        "recorder",
+        "director",
+        "goal_evaluator"
+      ],
+      "type": "object"
+    },
     "codebuddyModelId": {
       "minLength": 1,
       "pattern": "^[a-z0-9][a-z0-9.-]*$",
@@ -10,6 +109,14 @@
     "codebuddyPresets": {
       "additionalProperties": false,
       "properties": {
+        "note": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
         "presets": {
           "additionalProperties": false,
           "properties": {
@@ -29,6 +136,14 @@
             "quality"
           ],
           "type": "object"
+        },
+        "unconfirmed_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
         }
       },
       "required": [
@@ -103,7 +218,8 @@
           "items": {
             "enum": [
               "codebuddy",
-              "opencode"
+              "opencode",
+              "claudecode"
             ],
             "type": "string"
           },
@@ -164,6 +280,14 @@
     "opencodePresets": {
       "additionalProperties": false,
       "properties": {
+        "note": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
         "presets": {
           "additionalProperties": false,
           "properties": {
@@ -183,6 +307,14 @@
             "quality"
           ],
           "type": "object"
+        },
+        "unconfirmed_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
         }
       },
       "required": [
@@ -312,6 +444,9 @@
     "platforms": {
       "additionalProperties": false,
       "properties": {
+        "claudecode": {
+          "$ref": "#/definitions/claudecodePresets"
+        },
         "codebuddy": {
           "$ref": "#/definitions/codebuddyPresets"
         },
@@ -320,6 +455,7 @@
         }
       },
       "required": [
+        "claudecode",
         "codebuddy",
         "opencode"
       ],

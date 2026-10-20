@@ -22,6 +22,10 @@
 #   opencode: 结构根 = agent 目录父目录（.opencode/ 或 ~/.config/opencode/）；
 #       管理面（lib/setup.sh/models/personas）= 安装根（~/.budgetbuddy/，A3）；
 #       rules 校验 AGENTS.fragment.md 的 12 个 rule 区块标记
+#   claudecode: 结构根 = agents 目录父目录（.claude/ 或 ~/.claude/，复数
+#       agents/commands/skills 与 codebuddy 同构）；管理面同 opencode 共享
+#       ~/.budgetbuddy/（A3）；rules 校验 CLAUDE.fragment.md（安装器合并进
+#       CLAUDE.md：项目根或 ~/.claude/CLAUDE.md）的 12 个 rule 区块标记
 #
 # Dependencies（setup.sh source 基础层后分发调用）:
 #   colors.sh    - budget_print_*
@@ -55,7 +59,9 @@ _budget_validate_structure_dir() {
     # 结构文件根（agents/commands/skills/rules/hooks 的父目录）:
     #   codebuddy → 安装根（BUDGET_SETUP_DIR，结构与管理面同根）
     #   opencode  → agent 目录父目录（.opencode/ 或 ~/.config/opencode/）
-    if [[ "${BUDGET_PLATFORM_KIND:-}" == "opencode" && -n "${BUDGET_AGENTS_DIR:-}" ]]; then
+    #   claudecode → agents 目录父目录（.claude/ 或 ~/.claude/）
+    if [[ ( "${BUDGET_PLATFORM_KIND:-}" == "opencode" || "${BUDGET_PLATFORM_KIND:-}" == "claudecode" ) \
+          && -n "${BUDGET_AGENTS_DIR:-}" ]]; then
         dirname "$BUDGET_AGENTS_DIR"
     else
         echo "$BUDGET_SETUP_DIR"
@@ -168,7 +174,7 @@ do_validate() {
     detect_platform >/dev/null || true
     if [[ "${BUDGET_PLATFORM_KIND:-unknown}" == "unknown" ]]; then
         budget_print_error "未检测到 BudgetBuddy 安装形态，无法确定校验落点"
-        budget_print_info "提示: BUDGET_PLATFORM=codebuddy|opencode 显式指定平台"
+        budget_print_info "提示: BUDGET_PLATFORM=codebuddy|claudecode|opencode 显式指定平台"
         return 1
     fi
 
@@ -193,8 +199,8 @@ do_validate() {
         _budget_validate_check "agents/$name.md" "$BUDGET_AGENTS_DIR/$name.md"
     done
 
-    # commands（budget×3 + opsx×4；codebuddy commands/<group>/<name>.md，
-    # opencode command/<group>-<name>.md，design.md §10 落点）
+    # commands（budget×3 + opsx×4；codebuddy/claudecode commands/<group>/<name>.md
+    # （分组目录同构），opencode command/<group>-<name>.md，design.md §10 落点）
     local cmd
     if [[ "$kind" == "opencode" ]]; then
         for cmd in "${_budget_validate_budget_commands[@]}"; do
@@ -212,7 +218,7 @@ do_validate() {
         done
     fi
 
-    # skills（6；codebuddy skills/，opencode skill/，design.md §10）
+    # skills（6；codebuddy/claudecode skills/ 复数，opencode skill/ 单数）
     local skills_root="skills"
     if [[ "$kind" == "opencode" ]]; then
         skills_root="skill"
@@ -222,33 +228,43 @@ do_validate() {
         _budget_validate_check "$skills_root/$skill/SKILL.md" "$structure_dir/$skills_root/$skill/SKILL.md"
     done
 
-    # rules（12；codebuddy 逐文件 .mdc / opencode AGENTS.fragment.md 12 区块）
+    # rules（12；codebuddy 逐文件 .mdc / opencode+claudecode fragment 12 区块）
     local rule
-    if [[ "$kind" == "opencode" ]]; then
+    if [[ "$kind" == "opencode" || "$kind" == "claudecode" ]]; then
         local fragment=""
         local candidate
-        # 候选: 结构根 fragment（源形态）> 结构根 AGENTS.md（安装器合并形态，
-        # design.md §10）> 管理面 fragment
-        for candidate in "$structure_dir/AGENTS.fragment.md" \
-                          "$structure_dir/AGENTS.md" \
-                          "$BUDGET_SETUP_DIR/AGENTS.fragment.md"; do
+        # 合并目标文件名（opencode AGENTS.md / claudecode CLAUDE.md）
+        local merged="AGENTS.md"
+        if [[ "$kind" == "claudecode" ]]; then
+            merged="CLAUDE.md"
+        fi
+        # 候选: 结构根 fragment（源形态）> 合并目标（安装器合并形态，design.md
+        # §10——claudecode 项目级 CLAUDE.md 在项目根而非 .claude/ 下）> 管理面 fragment
+        for candidate in "$structure_dir/${merged%.md}.fragment.md" \
+                          "$structure_dir/$merged" \
+                          "$BUDGET_SETUP_DIR/${merged%.md}.fragment.md"; do
             if [[ -f "$candidate" ]]; then
                 fragment="$candidate"
                 break
             fi
         done
+        if [[ "$kind" == "claudecode" && -z "$fragment" \
+              && "${BUDGET_PLATFORM_SCOPE:-}" == "project" && -n "${BUDGET_PLATFORM_ROOT:-}" ]] \
+            && [[ -f "$BUDGET_PLATFORM_ROOT/CLAUDE.md" ]]; then
+            fragment="$BUDGET_PLATFORM_ROOT/CLAUDE.md"
+        fi
         if [[ -z "$fragment" ]]; then
             _budget_validate_total=$((_budget_validate_total + 1))
-            budget_print_error "AGENTS.fragment.md（缺失: $structure_dir/AGENTS.fragment.md）"
-            _budget_validate_failed+=("AGENTS.fragment.md")
+            budget_print_error "${merged%.md}.fragment.md（缺失: $structure_dir/${merged%.md}.fragment.md）"
+            _budget_validate_failed+=("${merged%.md}.fragment.md")
         else
             for rule in "${_budget_validate_rules[@]}"; do
                 _budget_validate_total=$((_budget_validate_total + 1))
                 if grep -qF "<!-- budget-$rule:begin -->" "$fragment"; then
-                    budget_print_success "AGENTS.fragment.md 区块 budget-$rule"
+                    budget_print_success "$merged 区块 budget-$rule"
                 else
-                    budget_print_error "AGENTS.fragment.md 区块 budget-${rule}（缺失标记）"
-                    _budget_validate_failed+=("AGENTS.fragment.md 区块 budget-$rule")
+                    budget_print_error "$merged 区块 budget-${rule}（缺失标记）"
+                    _budget_validate_failed+=("$merged 区块 budget-$rule")
                 fi
             done
         fi
@@ -258,7 +274,7 @@ do_validate() {
         done
     fi
 
-    # hooks（仅 codebuddy；opencode 无 hooks 机制，design.md §9）
+    # hooks（仅 codebuddy；opencode/claudecode 无 hooks 机制，design.md §9）
     if [[ "$kind" == "codebuddy" ]]; then
         _budget_validate_check "hooks/budget-notify-hook.py" "$structure_dir/hooks/budget-notify-hook.py"
     fi

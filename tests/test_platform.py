@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""platform.sh 三分支探测单测（design.md §8.3）+ setup.sh 分发骨架冒烟。
+"""platform.sh 五分支探测单测（design.md §8.3）+ setup.sh 分发骨架冒烟。
 
 测试以 subprocess 驱动 bash：临时目录构造三种安装形态（codebuddy 项目级/
-全局、opencode 项目级/全局），HOME 环境隔离（剥离 BUDGET_* 变量），验证
-detect_platform 输出格式、全局变量副作用、向上查找 10 层边界与探测失败
-显式报错；另覆盖 setup.sh 子命令分发骨架（help/show/未知子命令/未就位
-模块报错/init shell 分发）与 utils.sh 数据目录、包装器写入函数。
+全局、claudecode 项目级/全局、opencode 项目级/全局），HOME 环境隔离（剥离
+BUDGET_* 变量），验证 detect_platform 输出格式、全局变量副作用、向上查找 10
+层边界与探测失败显式报错；另覆盖 setup.sh 子命令分发骨架（help/show/未知子
+命令/未就位模块报错/init shell 分发）与 utils.sh 数据目录、包装器写入函数。
 """
 
 import os
@@ -198,8 +198,105 @@ class DetectPlatformCodebuddyTests(SandboxTestCase):
         self.assertEqual(proc.stdout.splitlines(), expected)
 
 
+class DetectPlatformClaudecodeTests(SandboxTestCase):
+    """分支③④：claudecode 项目级（向上查找 .claude/agents/）与全局。"""
+
+    def test_project_level(self):
+        agent_dir = self.tmp / '.claude' / 'agents'
+        agent_dir.mkdir(parents=True)
+        (agent_dir / 'architect.md').write_text('---\n---\n')
+        sub = self.tmp / 'sub'
+        sub.mkdir()
+        proc = detect(sub, self.home)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), 'claudecode:project')
+
+    def test_project_level_upward_from_deep(self):
+        agent_dir = self.tmp / '.claude' / 'agents'
+        agent_dir.mkdir(parents=True)
+        (agent_dir / 'coder-senior.md').write_text('---\n---\n')
+        deep = make_deep_dir(self.tmp, 3)
+        proc = detect(deep, self.home)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), 'claudecode:project')
+
+    def test_global_level(self):
+        agent_dir = self.home / '.claude' / 'agents'
+        agent_dir.mkdir(parents=True)
+        (agent_dir / 'reviewer.md').write_text('---\n---\n')
+        proc = detect(self.work, self.home)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), 'claudecode:global')
+
+    def test_project_preferred_over_global(self):
+        project_agents = self.tmp / '.claude' / 'agents'
+        project_agents.mkdir(parents=True)
+        (project_agents / 'architect.md').write_text('---\n---\n')
+        global_agents = self.home / '.claude' / 'agents'
+        global_agents.mkdir(parents=True)
+        (global_agents / 'architect.md').write_text('---\n---\n')
+        proc = detect(self.work, self.home)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), 'claudecode:project')
+
+    def test_project_level_sets_vars(self):
+        agent_dir = self.tmp / '.claude' / 'agents'
+        agent_dir.mkdir(parents=True)
+        (agent_dir / 'goal-evaluator.md').write_text('---\n---\n')
+        sub = self.tmp / 'sub'
+        sub.mkdir()
+        proc = detect_vars(sub, self.home)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        expected = [
+            'kind=claudecode',
+            'scope=project',
+            'root=%s' % self.resolved(self.tmp),
+            'agents=%s/.claude/agents' % self.resolved(self.tmp),
+        ]
+        self.assertEqual(proc.stdout.splitlines(), expected)
+
+    def test_global_sets_vars(self):
+        agent_dir = self.home / '.claude' / 'agents'
+        agent_dir.mkdir(parents=True)
+        (agent_dir / 'tester.md').write_text('---\n---\n')
+        proc = detect_vars(self.work, self.home)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        expected = [
+            'kind=claudecode',
+            'scope=global',
+            'root=',
+            'agents=%s/.claude/agents' % self.home,
+        ]
+        self.assertEqual(proc.stdout.splitlines(), expected)
+
+
+class DetectPlatformPriorityTests(SandboxTestCase):
+    """探测序优先级：同时命中多个形态时取先（codebuddy > claudecode > opencode）。"""
+
+    def test_codebuddy_preferred_over_claudecode(self):
+        (self.tmp / '.codebuddy').mkdir()
+        (self.tmp / '.codebuddy' / 'setup.sh').write_text('#!/bin/bash\n')
+        agent_dir = self.tmp / '.claude' / 'agents'
+        agent_dir.mkdir(parents=True)
+        (agent_dir / 'architect.md').write_text('---\n---\n')
+        proc = detect(self.work, self.home)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), 'codebuddy:project:%s' % self.resolved(self.tmp))
+
+    def test_claudecode_preferred_over_opencode(self):
+        claude_agents = self.tmp / '.claude' / 'agents'
+        claude_agents.mkdir(parents=True)
+        (claude_agents / 'architect.md').write_text('---\n---\n')
+        opencode_agents = self.tmp / '.opencode' / 'agent'
+        opencode_agents.mkdir(parents=True)
+        (opencode_agents / 'architect.md').write_text('---\n---\n')
+        proc = detect(self.work, self.home)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), 'claudecode:project')
+
+
 class DetectPlatformOpencodeTests(SandboxTestCase):
-    """分支③：opencode 项目级（优先）/ 全局。"""
+    """分支⑤：opencode 项目级（优先）/ 全局。"""
 
     def test_project_level(self):
         agent_dir = self.tmp / '.opencode' / 'agent'
@@ -285,7 +382,7 @@ class DetectPlatformOpencodeTests(SandboxTestCase):
 
 
 class DetectPlatformFailureTests(SandboxTestCase):
-    """三级均未命中：显式报错并列出已检测位置，不静默猜默认。"""
+    """五级均未命中：显式报错并列出已检测位置，不静默猜默认。"""
 
     def test_unknown_returns_nonzero(self):
         proc = detect(self.work, self.home)
@@ -308,12 +405,17 @@ class DetectPlatformFailureTests(SandboxTestCase):
 
 
 class DetectPlatformEnvOverrideTests(SandboxTestCase):
-    """BUDGET_PLATFORM 显式覆盖（codebuddy|opencode；非法值忽略）。"""
+    """BUDGET_PLATFORM 显式覆盖（codebuddy|claudecode|opencode；非法值忽略）。"""
 
     def test_budget_platform_codebuddy(self):
         proc = detect(self.work, self.home, env_extra={'BUDGET_PLATFORM': 'codebuddy'})
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout.strip(), 'codebuddy:global')
+
+    def test_budget_platform_claudecode(self):
+        proc = detect(self.work, self.home, env_extra={'BUDGET_PLATFORM': 'claudecode'})
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), 'claudecode:global')
 
     def test_budget_platform_opencode(self):
         proc = detect(self.work, self.home, env_extra={'BUDGET_PLATFORM': 'opencode'})

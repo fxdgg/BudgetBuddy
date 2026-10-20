@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""install.sh 双平台安装器单测（design.md §10 / specs/installer）。
+"""install.sh 三平台安装器单测（design.md §10 / specs/installer）。
 
 以 subprocess 驱动 bash install.sh：临时目录构造 mini 仓库（install.sh +
 dist/ 副本，可自由改动 manifest 与文件哈希模拟升级场景，不触碰仓库真实
@@ -8,9 +8,18 @@ dist/），HOME 环境隔离（剥离外层 BUDGET_* 变量）。覆盖：
 
 - 四形态端到端（codebuddy 项目/全局、opencode 项目/全局）：文件落点、
   本地清单、命令包装器、hooks 注入（settings.json）、budget setup show 冒烟
-- AGENTS.md 标记区块幂等合并：创建 / 追加 / 幂等重装内容不变 / 用户内容保护
+- claudecode 项目级端到端（.claude/ 结构 + CLAUDE.md 标记区块 + 管理面
+  ~/.budgetbuddy/ + 本地清单 claudecode: 前缀段）
+- AGENTS.md / CLAUDE.md 标记区块幂等合并：创建 / 追加 / 幂等重装内容不变 /
+  用户内容保护
 - manifest 增量同步：哈希一致跳过、哈希变化覆盖、清单外用户文件保留、
   本地清单写入（files / platform_files 双字段）
+- 复审 C1 三组断言：write_local_manifest 合并写（opencode 无前缀段 /
+  claudecode: 前缀段 / files 磁盘存在性过滤，多平台共装两段并存）、
+  upgrade_diff_cleanup 命名空间解析（platform_files:claudecode 去前缀仅取
+  本平台段、无后缀 platform_files 仅取无冒号键，对既有安装升级模拟）、
+  local_manifest_other_platform 共装判定（opencode 视角带前缀键=他平台 /
+  claudecode 视角无冒号键=他平台 / 清单缺失=0）
 - 升级差集清理：本地旧清单 − 新 manifest 差集删除、清单外文件不受影响
 - 非交互：BUDGET_PLATFORM / BUDGET_GLOBAL 环境变量、无 tty 默认项目安装、
   both 双平台
@@ -31,6 +40,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 INSTALL_SH = REPO_ROOT / 'install.sh'
 DIST_CODEBUDDY = REPO_ROOT / 'dist' / 'codebuddy'
 DIST_OPENCODE = REPO_ROOT / 'dist' / 'opencode'
+DIST_CLAUDECODE = REPO_ROOT / 'dist' / 'claudecode'
 
 SUITE_AGENTS = (
     'architect', 'coder-lite', 'coder-standard', 'coder-senior', 'reviewer',
@@ -64,12 +74,13 @@ def count_files(root):
 
 
 def make_mini_repo(base):
-    """构造 mini 仓库：install.sh + dist/ 双平台副本（可自由改动模拟升级）。"""
+    """构造 mini 仓库：install.sh + dist/ 三平台副本（可自由改动模拟升级）。"""
     repo = base / 'repo'
     repo.mkdir()
     shutil.copy2(INSTALL_SH, repo / 'install.sh')
     shutil.copytree(DIST_CODEBUDDY, repo / 'dist' / 'codebuddy')
     shutil.copytree(DIST_OPENCODE, repo / 'dist' / 'opencode')
+    shutil.copytree(DIST_CLAUDECODE, repo / 'dist' / 'claudecode')
     return repo
 
 
@@ -484,6 +495,266 @@ class OpencodeGlobalTests(InstallerSandbox):
         # 项目目录不受影响
         self.assertFalse((self.work / '.opencode').exists())
         self.assertFalse((self.work / 'AGENTS.md').exists())
+
+
+def split_manifest_entries(files, prefixes):
+    """按平台结构目录前缀拆分 manifest files 键集。
+
+    返回 (struct, mgmt)：struct = 平台结构条目；mgmt = 管理面条目（不含
+    *.fragment.md——fragment 走合并不复制，不进本地清单任何字段）。
+    """
+    struct = {rel for rel in files if rel.startswith(tuple(p + '/' for p in prefixes))}
+    rest = set(files) - struct
+    mgmt = {rel for rel in rest if not rel.endswith('.fragment.md')}
+    return struct, mgmt
+
+
+class ClaudecodeProjectTests(InstallerSandbox):
+    """claudecode 项目级安装端到端（specs/installer Scenario「claudecode 项目级安装」）。"""
+
+    def install(self):
+        result = self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'claudecode', 'BUDGET_GLOBAL': '0'})
+        self.assert_install_ok(result)
+        return result
+
+    def test_full_layout(self):
+        self.install()
+        cc = self.work / '.claude'
+        # 平台结构：agents×10 / commands（budget×3 + opsx×4）/ skills×6
+        for name in SUITE_AGENTS:
+            self.assertTrue((cc / 'agents' / ('%s.md' % name)).is_file(),
+                            '缺失 agent: %s' % name)
+        for rel in ('budget/start.md', 'budget/status.md', 'budget/goal.md',
+                    'opsx/apply.md', 'opsx/archive.md', 'opsx/explore.md',
+                    'opsx/propose.md'):
+            self.assertTrue((cc / 'commands' / rel).is_file(), '缺失命令: %s' % rel)
+        self.assertTrue((cc / 'skills' / 'budget-workflow' / 'SKILL.md').is_file())
+        # CLAUDE.fragment.md 不复制为文件（合并进 CLAUDE.md）
+        self.assertFalse((cc / 'CLAUDE.fragment.md').exists())
+        # hooks 不注入（routing.hook 空串，settings.json 不生成）
+        self.assertFalse((cc / 'settings.json').exists())
+        # 管理面统一 ~/.budgetbuddy/（与 opencode 共享）
+        mgmt = self.home / '.budgetbuddy'
+        self.assertTrue((mgmt / 'setup.sh').is_file())
+        self.assertTrue((mgmt / 'lib' / 'utils.sh').is_file())
+        self.assertTrue((mgmt / 'budget-models.json').is_file())
+        self.assertTrue((mgmt / 'personas.json').is_file())
+        self.assertTrue((mgmt / 'docs' / 'MODEL_SELECTION.md').is_file())
+        # CLAUDE.md 标记区块（项目根）
+        claude_md = self.work / 'CLAUDE.md'
+        text = claude_md.read_text(encoding='utf-8')
+        self.assertIn(AGENTS_BEGIN, text)
+        self.assertIn(AGENTS_END, text)
+        self.assertIn('budget-leader-no-code:begin', text)
+        # 命令包装器
+        self.assertTrue((self.home / '.local' / 'bin' / 'budget').is_file())
+
+    def test_local_manifest_prefixed_segment(self):
+        """本地清单：platform_files 条目带 claudecode: 前缀（单装命名空间格式）。"""
+        self.install()
+        local = load_json(self.home / '.budgetbuddy' / '.budget-manifest.json')
+        dist = load_json(self.repo / 'dist' / 'claudecode' / '.manifest.json')
+        struct, mgmt = split_manifest_entries(
+            dist['files'], ('agents', 'commands', 'skills'))
+        # files 字段 = 管理面条目（相对 ~/.budgetbuddy/，哈希与 dist 一致）
+        self.assertEqual(local['files'],
+                         {rel: dist['files'][rel] for rel in sorted(mgmt)})
+        # platform_files = claudecode: 前缀平台结构条目
+        self.assertEqual(set(local['platform_files']),
+                         {'claudecode:' + rel for rel in struct})
+        for key, sha in local['platform_files'].items():
+            self.assertEqual(sha, dist['files'][key[len('claudecode:'):]], key)
+        # fragment 不入任何清单字段（合并产物非复制文件）
+        self.assertNotIn('CLAUDE.fragment.md', local['files'])
+        self.assertNotIn('CLAUDE.fragment.md', local['platform_files'])
+
+    def test_claude_md_idempotent(self):
+        # specs/installer Scenario「幂等重装」：区块内容不变、无重复追加
+        self.install()
+        first = (self.work / 'CLAUDE.md').read_text(encoding='utf-8')
+        self.install()
+        second = (self.work / 'CLAUDE.md').read_text(encoding='utf-8')
+        self.assertEqual(first, second)
+        self.assertEqual(1, first.count(AGENTS_BEGIN))
+        self.assertEqual(1, first.count(AGENTS_END))
+
+    def test_claude_md_user_content_preserved(self):
+        # specs/installer Scenario「用户内容保护」：区块外用户内容原样保留
+        user_text = '# My project\n\nCustom instructions for my team.\n'
+        (self.work / 'CLAUDE.md').write_text(user_text, encoding='utf-8')
+        self.install()
+        text = (self.work / 'CLAUDE.md').read_text(encoding='utf-8')
+        self.assertTrue(text.startswith(user_text))
+        self.assertIn(AGENTS_BEGIN, text)
+
+    def test_reinstall_all_skipped(self):
+        self.install()
+        dist = load_json(self.repo / 'dist' / 'claudecode' / '.manifest.json')
+        # fragment 走合并不复制，不计入同步统计
+        total = len([rel for rel in dist['files']
+                     if not rel.endswith('.fragment.md')])
+        result = self.install()
+        # 幂等重装：全部文件哈希一致跳过（结构 + 管理面两段合计）
+        self.assertIn('新增 0 / 更新 0', result.stdout)
+        self.assertIn('跳过 %d' % total, result.stdout)
+
+
+class CoInstallManifestTests(InstallerSandbox):
+    """复审 C1-①：write_local_manifest 合并写（多平台共装两段并存）。"""
+
+    def install_opencode(self):
+        result = self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'opencode', 'BUDGET_GLOBAL': '0'})
+        self.assert_install_ok(result)
+        return result
+
+    def install_claudecode(self):
+        result = self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'claudecode', 'BUDGET_GLOBAL': '0'})
+        self.assert_install_ok(result)
+        return result
+
+    def test_dual_platform_segments_coexist(self):
+        """共装两段并存：opencode 无前缀段 + claudecode: 前缀段，值与各自
+        dist manifest 一致；files 段合并写保留他平台管理面条目。"""
+        self.install_opencode()
+        self.install_claudecode()
+        local = load_json(self.home / '.budgetbuddy' / '.budget-manifest.json')
+        oc_dist = load_json(self.repo / 'dist' / 'opencode' / '.manifest.json')
+        cc_dist = load_json(self.repo / 'dist' / 'claudecode' / '.manifest.json')
+        oc_struct, oc_mgmt = split_manifest_entries(
+            oc_dist['files'], ('agent', 'command', 'skill'))
+        cc_struct, cc_mgmt = split_manifest_entries(
+            cc_dist['files'], ('agents', 'commands', 'skills'))
+        # opencode 段：无前缀键（历史格式，后装不覆盖先装）
+        self.assertEqual(
+            {k for k in local['platform_files'] if ':' not in k}, oc_struct)
+        for rel in oc_struct:
+            self.assertEqual(local['platform_files'][rel], oc_dist['files'][rel], rel)
+        # claudecode 段：claudecode: 前缀键
+        self.assertEqual(
+            {k for k in local['platform_files'] if k.startswith('claudecode:')},
+            {'claudecode:' + rel for rel in cc_struct})
+        for rel in cc_struct:
+            self.assertEqual(
+                local['platform_files']['claudecode:' + rel], cc_dist['files'][rel], rel)
+        # files 合并写：claudecode 管理面 + opencode 独有管理面（磁盘仍存在者，
+        # 如 docs/setup-notes.md）
+        self.assertEqual(set(local['files']), cc_mgmt | oc_mgmt)
+        self.assertIn('docs/setup-notes.md', local['files'])
+        # 两平台结构文件并存落盘
+        self.assertTrue((self.work / '.opencode' / 'agent' / 'architect.md').is_file())
+        self.assertTrue((self.work / '.claude' / 'agents' / 'architect.md').is_file())
+
+    def test_files_disk_existence_filter(self):
+        """files 磁盘存在性过滤：他平台管理面条目对应文件已从磁盘删除 →
+        claudecode 合并写不延续该条目。"""
+        self.install_opencode()
+        stale = self.home / '.budgetbuddy' / 'docs' / 'setup-notes.md'
+        self.assertTrue(stale.is_file())
+        stale.unlink()
+        self.install_claudecode()
+        local = load_json(self.home / '.budgetbuddy' / '.budget-manifest.json')
+        self.assertNotIn('docs/setup-notes.md', local['files'])
+
+
+class UpgradeNamespaceTests(InstallerSandbox):
+    """复审 C1-②：upgrade_diff_cleanup 命名空间解析（对既有安装升级模拟）。"""
+
+    def install_opencode(self):
+        result = self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'opencode', 'BUDGET_GLOBAL': '0'})
+        self.assert_install_ok(result)
+        return result
+
+    def install_claudecode(self):
+        result = self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'claudecode', 'BUDGET_GLOBAL': '0'})
+        self.assert_install_ok(result)
+        return result
+
+    def _drop_from_dist(self, platform, rel):
+        """从 mini 仓库 dist 清单与磁盘移除一个产物文件（模拟新版下线）。"""
+        manifest_path = self.repo / 'dist' / platform / '.manifest.json'
+        manifest = load_json(manifest_path)
+        del manifest['files'][rel]
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True), encoding='utf-8')
+        (self.repo / 'dist' / platform / rel).unlink()
+
+    def test_claudecode_upgrade_cleans_only_own_segment(self):
+        """platform_files:claudecode 去前缀仅取本平台段：升级清理删除
+        .claude/ 陈旧文件，opencode 段与其落盘文件不受影响。"""
+        self.install_opencode()
+        self.install_claudecode()
+        self._drop_from_dist('claudecode', 'agents/goal-evaluator.md')
+        result = self.install_claudecode()
+        self.assertIn('差集清理', result.stdout)
+        self.assertFalse((self.work / '.claude' / 'agents' / 'goal-evaluator.md').exists())
+        self.assertTrue((self.work / '.opencode' / 'agent' / 'goal-evaluator.md').is_file())
+        local = load_json(self.home / '.budgetbuddy' / '.budget-manifest.json')
+        self.assertNotIn('claudecode:agents/goal-evaluator.md', local['platform_files'])
+        self.assertIn('agent/goal-evaluator.md', local['platform_files'])
+
+    def test_opencode_upgrade_cleans_only_own_segment(self):
+        """无后缀 platform_files 仅取无冒号键：opencode 升级清理删除
+        .opencode/ 陈旧文件，claudecode: 前缀段与其落盘文件不受影响。"""
+        self.install_opencode()
+        self.install_claudecode()
+        self._drop_from_dist('opencode', 'agent/goal-evaluator.md')
+        result = self.install_opencode()
+        self.assertIn('差集清理', result.stdout)
+        self.assertFalse((self.work / '.opencode' / 'agent' / 'goal-evaluator.md').exists())
+        self.assertTrue((self.work / '.claude' / 'agents' / 'goal-evaluator.md').is_file())
+        local = load_json(self.home / '.budgetbuddy' / '.budget-manifest.json')
+        self.assertNotIn('agent/goal-evaluator.md', local['platform_files'])
+        self.assertIn('claudecode:agents/goal-evaluator.md', local['platform_files'])
+
+    def test_mgmt_cleanup_skipped_when_co_installed(self):
+        """共装 guard：claudecode 升级跳过管理面差集清理，opencode 独有
+        管理面文件（docs/setup-notes.md）不被误删。"""
+        self.install_opencode()
+        result = self.install_claudecode()
+        self.assertIn('检测到其他平台共装', result.stdout)
+        self.assertIn('跳过管理面差集清理', result.stdout)
+        self.assertTrue(
+            (self.home / '.budgetbuddy' / 'docs' / 'setup-notes.md').is_file())
+
+
+class OtherPlatformDetectionTests(InstallerSandbox):
+    """复审 C1-③：local_manifest_other_platform 共装判定三视角。"""
+
+    def test_claudecode_view_unprefixed_keys_are_other(self):
+        # claudecode 视角：无冒号键（opencode 历史格式）= 他平台 → 1
+        # → claudecode 安装跳过管理面差集清理
+        result = self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'opencode', 'BUDGET_GLOBAL': '0'})
+        self.assert_install_ok(result)
+        result = self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'claudecode', 'BUDGET_GLOBAL': '0'})
+        self.assert_install_ok(result)
+        self.assertIn('检测到其他平台共装', result.stdout)
+
+    def test_opencode_view_prefixed_keys_are_other(self):
+        # opencode 视角：带前缀键（claudecode:）= 他平台 → 1
+        # → opencode 重装跳过管理面差集清理
+        for platform in ('opencode', 'claudecode'):
+            result = self.run_install(
+                env_extra={'BUDGET_PLATFORM': platform, 'BUDGET_GLOBAL': '0'})
+            self.assert_install_ok(result)
+        result = self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'opencode', 'BUDGET_GLOBAL': '0'})
+        self.assert_install_ok(result)
+        self.assertIn('检测到其他平台共装', result.stdout)
+
+    def test_missing_manifest_means_no_other(self):
+        # 清单缺失 = 0：单装无共装提示，管理面差集清理正常执行
+        result = self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'claudecode', 'BUDGET_GLOBAL': '0'})
+        self.assert_install_ok(result)
+        self.assertNotIn('检测到其他平台共装', result.stdout)
+        self.assertNotIn('跳过管理面差集清理', result.stdout)
 
 
 class UpgradeTests(InstallerSandbox):

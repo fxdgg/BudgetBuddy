@@ -9,15 +9,18 @@
 
 | 厂商 | 模型 ID | 档位 | 成本 | 标签 | 可用平台 | 备注 |
 |------|---------|------|------|------|----------|------|
-| claude | claude-opus-4.8 | top | x3.50 | reasoning | codebuddy, opencode |  |
-| claude | claude-opus-4.8-1m | top | x3.50 | reasoning, long-context | codebuddy, opencode |  |
-| claude | claude-opus-4.7-1m | top | x3.33 | reasoning, long-context | codebuddy, opencode |  |
-| claude | claude-opus-4.7 | top | x3.33 | reasoning | codebuddy, opencode |  |
-| claude | claude-opus-4.6-1m | top | x3.33 | reasoning, long-context | codebuddy, opencode |  |
-| claude | claude-opus-4.6 | top | x3.33 | reasoning | codebuddy, opencode |  |
-| claude | claude-sonnet-4.6-1m | mid | x2.00 | general, long-context | codebuddy, opencode |  |
-| claude | claude-sonnet-4.6 | mid | x2.00 | general | codebuddy, opencode |  |
-| claude | claude-haiku-4.5 | budget | x0.67 | fast | codebuddy, opencode |  |
+| claude | claude-opus-5-5 | top | x3.50 | reasoning | claudecode | 官方 Claude Code 默认模型（$4/百万输入），2026-09-22 发布；经本机 Claude Code 2.1.304 实测核对（2026-10-20） |
+| claude | claude-opus-4.8 | top | x3.50 | reasoning | codebuddy, opencode, claudecode |  |
+| claude | claude-opus-4.8-1m | top | x3.50 | reasoning, long-context | codebuddy, opencode, claudecode |  |
+| claude | claude-opus-4.7-1m | top | x3.33 | reasoning, long-context | codebuddy, opencode, claudecode |  |
+| claude | claude-opus-4.7 | top | x3.33 | reasoning | codebuddy, opencode, claudecode |  |
+| claude | claude-opus-4.6-1m | top | x3.33 | reasoning, long-context | codebuddy, opencode, claudecode |  |
+| claude | claude-opus-4.6 | top | x3.33 | reasoning | codebuddy, opencode, claudecode |  |
+| claude | claude-sonnet-5-5 | mid | x2.00 | general | claudecode | 2026-09-28 发布（$2/$10 定价）；经本机 Claude Code 2.1.304 实测核对（2026-10-20） |
+| claude | claude-sonnet-4.6-1m | mid | x2.00 | general, long-context | codebuddy, opencode, claudecode |  |
+| claude | claude-sonnet-4.6 | mid | x2.00 | general | codebuddy, opencode, claudecode |  |
+| claude | claude-haiku-5-5 | budget | x0.67 | fast | claudecode | 2026-10-07 发布；经本机 Claude Code 2.1.304 实测核对（2026-10-20） |
+| claude | claude-haiku-4.5 | budget | x0.67 | fast | codebuddy, opencode, claudecode |  |
 | gemini | gemini-3.5-flash | mid | x0.99 | agent, tool-use, fast | codebuddy, opencode | Terminal-Bench 76.2%、MCP Atlas 83.6%、Agent Elo 1656 |
 | gemini | gemini-2.5-pro | mid | x0.90 | reasoning | codebuddy, opencode | 已弃用：路由稳定性问题，不推荐用作 agent 模型 |
 | gemini | gemini-3.1-pro | mid | x1.32 | general | codebuddy, opencode |  |
@@ -50,20 +53,20 @@
 | opencode | deepseek-v4.1-flash-free | free | x0.00 | code, fast | opencode | OpenCode 官方免费系，经本机 opencode models 核对存在 |
 | opencode | glm-5.3-flash-free | free | x0.00 | general, fast | opencode | OpenCode 官方免费系，经本机 opencode models 核对存在 |
 
-## 预设总览（三档 × 双平台）
+## 预设总览（三档 × 全部平台）
 
-| 角色 | codebuddy economic | codebuddy balanced | codebuddy quality | opencode economic | opencode balanced | opencode quality |
-|------|------|------|------|------|------|------|
-| architect | deepseek-v4-pro | glm-5.2 | claude-opus-4.7-1m | deepseek/deepseek-v4-pro | zhipu/glm-5.2 | anthropic/claude-opus-4.7 |
-| coder_lite | hy3 | hy3 | deepseek-v4-flash | opencode/glm-5.3-flash-free | opencode/glm-5.3-flash-free | deepseek/deepseek-flash |
-| coder_standard | deepseek-v4-flash | deepseek-v4-flash | deepseek-v4-pro | deepseek/deepseek-flash | deepseek/deepseek-flash | deepseek/deepseek-v4-pro |
-| coder_senior | deepseek-v4-pro | deepseek-v4-pro | claude-sonnet-4.6-1m | deepseek/deepseek-v4-pro | deepseek/deepseek-v4-pro | anthropic/claude-sonnet-4.6 |
-| reviewer | hy3 | deepseek-v4-pro | kimi-k2.7 | opencode/glm-5.3-flash-free | deepseek/deepseek-v4-pro | moonshotai/kimi-k2.7 |
-| reviewer_b | hunyuan-2.0-thinking | kimi-k2.7 | deepseek-v4-pro | opencode/deepseek-v4.1-flash-free | moonshotai/kimi-k2.7 | deepseek/deepseek-v4-pro |
-| tester | hy3 | kimi-k2.7 | gemini-3.5-flash | opencode/glm-5.3-flash-free | moonshotai/kimi-k2.7 | google/gemini-3.5-flash |
-| recorder | hy3 | hy3 | claude-haiku-4.5 | opencode/glm-5.3-flash-free | opencode/glm-5.3-flash-free | anthropic/claude-haiku-4.5 |
-| director | claude-opus-4.6-1m | claude-opus-4.7-1m | claude-opus-4.7-1m | anthropic/claude-opus-4.6 | anthropic/claude-opus-4.7 | anthropic/claude-opus-4.7 |
-| goal_evaluator | kimi-k2.5 | claude-haiku-4.5 | claude-haiku-4.5 | opencode/deepseek-v4.1-flash-free | anthropic/claude-haiku-4.5 | anthropic/claude-haiku-4.5 |
+| 角色 | claudecode economic | claudecode balanced | claudecode quality | codebuddy economic | codebuddy balanced | codebuddy quality | opencode economic | opencode balanced | opencode quality |
+|------|------|------|------|------|------|------|------|------|------|
+| architect | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | deepseek-v4-pro | glm-5.2 | claude-opus-4.7-1m | deepseek/deepseek-v4-pro | zhipu/glm-5.2 | anthropic/claude-opus-4.7 |
+| coder_lite | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | hy3 | hy3 | deepseek-v4-flash | opencode/glm-5.3-flash-free | opencode/glm-5.3-flash-free | deepseek/deepseek-flash |
+| coder_standard | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | deepseek-v4-flash | deepseek-v4-flash | deepseek-v4-pro | deepseek/deepseek-flash | deepseek/deepseek-flash | deepseek/deepseek-v4-pro |
+| coder_senior | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | deepseek-v4-pro | deepseek-v4-pro | claude-sonnet-4.6-1m | deepseek/deepseek-v4-pro | deepseek/deepseek-v4-pro | anthropic/claude-sonnet-4.6 |
+| reviewer | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | hy3 | deepseek-v4-pro | kimi-k2.7 | opencode/glm-5.3-flash-free | deepseek/deepseek-v4-pro | moonshotai/kimi-k2.7 |
+| reviewer_b | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | hunyuan-2.0-thinking | kimi-k2.7 | deepseek-v4-pro | opencode/deepseek-v4.1-flash-free | moonshotai/kimi-k2.7 | deepseek/deepseek-v4-pro |
+| tester | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | hy3 | kimi-k2.7 | gemini-3.5-flash | opencode/glm-5.3-flash-free | moonshotai/kimi-k2.7 | google/gemini-3.5-flash |
+| recorder | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | hy3 | hy3 | claude-haiku-4.5 | opencode/glm-5.3-flash-free | opencode/glm-5.3-flash-free | anthropic/claude-haiku-4.5 |
+| director | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | claude-opus-4.6-1m | claude-opus-4.7-1m | claude-opus-4.7-1m | anthropic/claude-opus-4.6 | anthropic/claude-opus-4.7 | anthropic/claude-opus-4.7 |
+| goal_evaluator | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | kimi-k2.5 | claude-haiku-4.5 | claude-haiku-4.5 | opencode/deepseek-v4.1-flash-free | anthropic/claude-haiku-4.5 | anthropic/claude-haiku-4.5 |
 
 ## 平台说明
 
@@ -77,4 +80,4 @@
 - **成本梯度不可倒挂**：coder_senior > coder_standard > coder_lite（任何预设均满足）。
 - **审查与编码尽量不同厂商**：减少「自己写自己审」的同系盲区。
 - **简写别名**：`budget setup agent custom <alias>` 支持简写（如 `opus`/`kimi`/`glm`），自动解析为标准 ID 后统一覆写。
-- **待确认标注**：OpenCode 侧未能核对的 provider/model ID 在 `budget-models.json` 的 `_meta.unconfirmed_opencode_ids` 中列出，上线前须逐一核对清零。
+- **待确认标注**：各平台未能核对的 provider/model ID 在 `budget-models.json` 的 `platforms.<平台>.unconfirmed_ids` 中列出，上线前须逐一核对清零。

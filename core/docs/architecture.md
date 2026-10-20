@@ -4,7 +4,7 @@
 
 ## 总览
 
-BudgetBuddy 的核心设计是**单一中立源 + 构建期平台适配**：所有内容只在 `core/` 维护一份，`scripts/build.py` 按 `core/platform/*.yaml` 声明的映射 DSL 生成双平台产物，安装器把产物落到各平台的约定位置。
+BudgetBuddy 的核心设计是**单一中立源 + 构建期平台适配**：所有内容只在 `core/` 维护一份，`scripts/build.py` 按 `core/platform/*.yaml` 声明的映射 DSL 生成三平台产物，安装器把产物落到各平台的约定位置。
 
 ```mermaid
 flowchart LR
@@ -29,6 +29,7 @@ flowchart LR
 
     subgraph DIST["dist/（构建产物，禁手改）"]
         DC["codebuddy/"]
+        DCC["claudecode/"]
         DO["opencode/"]
     end
 
@@ -36,6 +37,7 @@ flowchart LR
 
     subgraph RT["运行时（用户侧）"]
         CB["CodeBuddy<br/>.codebuddy/ 或 ~/.codebuddy/"]
+        CC["Claude Code<br/>.claude/ 或 ~/.claude/"]
         OC["OpenCode<br/>.opencode/ 或 ~/.config/opencode/"]
         MGMT["~/.budgetbuddy/<br/>管理面 + 数据"]
     end
@@ -47,18 +49,20 @@ flowchart LR
     REL -->|"release zip"| INST
     SRC -->|"本地仓库直装"| INST
     INST -->|"结构性文件"| CB
+    INST -->|"结构性文件"| CC
     INST -->|"结构性文件"| OC
     INST -->|"管理面 + 数据目录"| MGMT
     CB -.->|"读取"| MGMT
+    CC -.->|"读取"| MGMT
     OC -.->|"读取"| MGMT
 ```
 
 ## 构建链路
 
 1. **解析**：`build.py` 用内置的最小 YAML 子集解析器读取 `core/platform/*.yaml`（无第三方依赖），并做 DSL schema 校验（缺 routing 键等即构建失败）
-2. **转换**：按 DSL 逐文件转换——agent frontmatter 按平台 emit/drop 规则重写（权限三态映射为 CodeBuddy `permissionMode` 或 OpenCode `permission` map）；正文模板变量（`{{TASK_TOOL}}` 等六变量）按平台白名单精确替换
+2. **转换**：按 DSL 逐文件转换——agent frontmatter 按平台 emit/drop 规则重写（权限三态映射为 CodeBuddy/Claude Code `permissionMode` 或 OpenCode `permission` map）；正文模板变量（`{{TASK_TOOL}}` 等六变量）按平台白名单精确替换
 3. **渲染**：`docs/MODEL_SELECTION.template.md` + `budget-models.json` 按平台渲染出 `docs/MODEL_SELECTION.md`（占位符与六变量共用替换器但白名单独立）
-4. **落位**：routing 规则决定每个源文件的目标路径（CodeBuddy 命令 `/budget:start`、OpenCode 命令 `/budget-start`；OpenCode 侧 12 条规则合并为单文件 `AGENTS.fragment.md` 标记区块）
+4. **落位**：routing 规则决定每个源文件的目标路径（CodeBuddy/Claude Code 命令 `/budget:start`、OpenCode 命令 `/budget-start`；OpenCode 与 Claude Code 侧 12 条规则分别合并为单文件 `AGENTS.fragment.md`/`CLAUDE.fragment.md` 标记区块）
 5. **清单**：写 `dist/<platform>/.manifest.json`（路径 → SHA256，按键排序、无时间戳），作为安装器增量同步与升级差集清理的依据
 6. **原子性**：先构建到 `dist/<platform>.new/` 临时目录，全部成功后原子替换；失败保持原样
 
@@ -109,8 +113,8 @@ flowchart TB
     STATE_PY -.->|"skill 文档经固定路径<br/>$HOME/.budgetbuddy/lib/ 引用"| SKILLREF["budget-workflow skill"]
 ```
 
-- **基础层**：`platform.sh` 运行时三级探测（codebuddy 项目级 → codebuddy 全局 → opencode 项目级优先/全局），均未命中显式报错
-- **状态机单份化**：`budget-state.py` 仅 lib 一份，skill 文档以 `$HOME/.budgetbuddy/lib/budget-state.py` 固定路径引用（双平台落位后均成立）
+- **基础层**：`platform.sh` 运行时五级探测（codebuddy 项目级 → codebuddy 全局 → claudecode 项目级 → claudecode 全局 → opencode 项目级优先/全局），均未命中显式报错
+- **状态机单份化**：`budget-state.py` 仅 lib 一份，skill 文档以 `$HOME/.budgetbuddy/lib/budget-state.py` 固定路径引用（三平台落位后均成立）
 - **hooks 注入**：仅 CodeBuddy；注入前备份 `settings.json.bak-budget`，临时文件 + 原子 rename 写入，同时负责 superpowers 插件启用检测
 
 ## 运行时数据流

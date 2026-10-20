@@ -1,18 +1,8 @@
 {
   "_meta": {
-    "description": "BudgetBuddy 可用模型目录与双平台（CodeBuddy/OpenCode）三档预设配置",
-    "unconfirmed_note": "unconfirmed_opencode_ids 所列预设 ID 未能经本机 opencode 环境核对（本机未配置对应官方 provider），使用前须对照 opencode 官方模型清单确认存在性；上线发布前必须逐一核对清零。",
-    "unconfirmed_opencode_ids": [
-      "anthropic/claude-haiku-4.5",
-      "anthropic/claude-opus-4.6",
-      "anthropic/claude-opus-4.7",
-      "anthropic/claude-sonnet-4.6",
-      "google/gemini-3.5-flash",
-      "moonshotai/kimi-k2.7",
-      "zhipu/glm-5.2"
-    ],
+    "description": "BudgetBuddy 可用模型目录与三平台（CodeBuddy/OpenCode/Claude Code）三档预设配置",
     "update_command": "budget setup models",
-    "updated_at": "2026-10-18"
+    "updated_at": "2026-10-20"
   },
   "aliases": {
     "codex": "gpt-5.3-codex",
@@ -115,10 +105,23 @@
       "claude": [
         {
           "cost": "x3.50",
+          "id": "claude-opus-5-5",
+          "note": "官方 Claude Code 默认模型（$4/百万输入），2026-09-22 发布；经本机 Claude Code 2.1.304 实测核对（2026-10-20）",
+          "platform": [
+            "claudecode"
+          ],
+          "tags": [
+            "reasoning"
+          ],
+          "tier": "top"
+        },
+        {
+          "cost": "x3.50",
           "id": "claude-opus-4.8",
           "platform": [
             "codebuddy",
-            "opencode"
+            "opencode",
+            "claudecode"
           ],
           "tags": [
             "reasoning"
@@ -130,7 +133,8 @@
           "id": "claude-opus-4.8-1m",
           "platform": [
             "codebuddy",
-            "opencode"
+            "opencode",
+            "claudecode"
           ],
           "tags": [
             "reasoning",
@@ -143,7 +147,8 @@
           "id": "claude-opus-4.7-1m",
           "platform": [
             "codebuddy",
-            "opencode"
+            "opencode",
+            "claudecode"
           ],
           "tags": [
             "reasoning",
@@ -156,7 +161,8 @@
           "id": "claude-opus-4.7",
           "platform": [
             "codebuddy",
-            "opencode"
+            "opencode",
+            "claudecode"
           ],
           "tags": [
             "reasoning"
@@ -168,7 +174,8 @@
           "id": "claude-opus-4.6-1m",
           "platform": [
             "codebuddy",
-            "opencode"
+            "opencode",
+            "claudecode"
           ],
           "tags": [
             "reasoning",
@@ -181,7 +188,8 @@
           "id": "claude-opus-4.6",
           "platform": [
             "codebuddy",
-            "opencode"
+            "opencode",
+            "claudecode"
           ],
           "tags": [
             "reasoning"
@@ -190,10 +198,23 @@
         },
         {
           "cost": "x2.00",
+          "id": "claude-sonnet-5-5",
+          "note": "2026-09-28 发布（$2/$10 定价）；经本机 Claude Code 2.1.304 实测核对（2026-10-20）",
+          "platform": [
+            "claudecode"
+          ],
+          "tags": [
+            "general"
+          ],
+          "tier": "mid"
+        },
+        {
+          "cost": "x2.00",
           "id": "claude-sonnet-4.6-1m",
           "platform": [
             "codebuddy",
-            "opencode"
+            "opencode",
+            "claudecode"
           ],
           "tags": [
             "general",
@@ -206,7 +227,8 @@
           "id": "claude-sonnet-4.6",
           "platform": [
             "codebuddy",
-            "opencode"
+            "opencode",
+            "claudecode"
           ],
           "tags": [
             "general"
@@ -215,10 +237,23 @@
         },
         {
           "cost": "x0.67",
+          "id": "claude-haiku-5-5",
+          "note": "2026-10-07 发布；经本机 Claude Code 2.1.304 实测核对（2026-10-20）",
+          "platform": [
+            "claudecode"
+          ],
+          "tags": [
+            "fast"
+          ],
+          "tier": "budget"
+        },
+        {
+          "cost": "x0.67",
           "id": "claude-haiku-4.5",
           "platform": [
             "codebuddy",
-            "opencode"
+            "opencode",
+            "claudecode"
           ],
           "tags": [
             "fast"
@@ -546,7 +581,57 @@
     }
   },
   "platforms": {
+    "claudecode": {
+      "note": [
+        "- 本平台预设值为 Claude Code 原生 claude 系模型 ID（economic→haiku 系、balanced→sonnet 系、quality→opus 系三档梯度）；构建期以 balanced 档烘焙 agent 产物的 model 字段。",
+        "- 三档预设模型 ID（claude-haiku-5-5 / claude-sonnet-5-5 / claude-opus-5-5）已于 2026-10-20 在本机 Claude Code 2.1.304 实测核对（零告警、调用成功）。",
+        "- 安装后可通过 `budget setup agent preset <economic|balanced|quality>` 批量切换档位，`budget setup agent custom <模型ID或别名>` 自定义覆写（简写别名经 aliases 表解析），`budget setup agent inherit` 跟随主会话模型。",
+        "- hooks 通知首发不支持（routing.hook 为空串不分发），通知能力经 notify CLI 降级路径提供。"
+      ],
+      "presets": {
+        "balanced": {
+          "architect": "claude-sonnet-5-5",
+          "coder_lite": "claude-sonnet-5-5",
+          "coder_senior": "claude-sonnet-5-5",
+          "coder_standard": "claude-sonnet-5-5",
+          "director": "claude-sonnet-5-5",
+          "goal_evaluator": "claude-sonnet-5-5",
+          "recorder": "claude-sonnet-5-5",
+          "reviewer": "claude-sonnet-5-5",
+          "reviewer_b": "claude-sonnet-5-5",
+          "tester": "claude-sonnet-5-5"
+        },
+        "economic": {
+          "architect": "claude-haiku-5-5",
+          "coder_lite": "claude-haiku-5-5",
+          "coder_senior": "claude-haiku-5-5",
+          "coder_standard": "claude-haiku-5-5",
+          "director": "claude-haiku-5-5",
+          "goal_evaluator": "claude-haiku-5-5",
+          "recorder": "claude-haiku-5-5",
+          "reviewer": "claude-haiku-5-5",
+          "reviewer_b": "claude-haiku-5-5",
+          "tester": "claude-haiku-5-5"
+        },
+        "quality": {
+          "architect": "claude-opus-5-5",
+          "coder_lite": "claude-opus-5-5",
+          "coder_senior": "claude-opus-5-5",
+          "coder_standard": "claude-opus-5-5",
+          "director": "claude-opus-5-5",
+          "goal_evaluator": "claude-opus-5-5",
+          "recorder": "claude-opus-5-5",
+          "reviewer": "claude-opus-5-5",
+          "reviewer_b": "claude-opus-5-5",
+          "tester": "claude-opus-5-5"
+        }
+      }
+    },
     "codebuddy": {
+      "note": [
+        "- 本平台预设值为 CodeBuddy 原生模型 ID（kebab-case）；构建期以 balanced 档烘焙 agent 产物的 model 字段。",
+        "- 安装后可通过 `budget setup agent preset <economic|balanced|quality>` 批量切换档位，`budget setup agent custom <模型ID或别名>` 自定义覆写（简写别名经 aliases 表解析），`budget setup agent inherit` 跟随主会话模型。"
+      ],
       "presets": {
         "balanced": {
           "architect": "glm-5.2",
@@ -587,6 +672,10 @@
       }
     },
     "opencode": {
+      "note": [
+        "- 本平台预设值为 `provider/model` 格式（anthropic/openai/google/zhipu/deepseek/moonshotai 系及 opencode 官方免费系）；使用前需在 opencode 配置中启用对应 provider。",
+        "- 构建期以 balanced 档烘焙 agent 产物的 model 字段；安装后可通过 `budget setup agent preset <economic|balanced|quality>` 批量切换档位，`budget setup agent inherit` 跟随主会话模型。"
+      ],
       "presets": {
         "balanced": {
           "architect": "zhipu/glm-5.2",
@@ -624,7 +713,16 @@
           "reviewer_b": "deepseek/deepseek-v4-pro",
           "tester": "google/gemini-3.5-flash"
         }
-      }
+      },
+      "unconfirmed_ids": [
+        "anthropic/claude-haiku-4.5",
+        "anthropic/claude-opus-4.6",
+        "anthropic/claude-opus-4.7",
+        "anthropic/claude-sonnet-4.6",
+        "google/gemini-3.5-flash",
+        "moonshotai/kimi-k2.7",
+        "zhipu/glm-5.2"
+      ]
     }
   },
   "provider_map": {

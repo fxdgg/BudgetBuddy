@@ -13,6 +13,13 @@ shell 侧（lib/models.sh、lib/preset.sh）经 CLI 调用；本模块承担全�
     current      当前 agent model 值查询（输出 "<agent 文件名>=<model>" 行）
     rewrite      批量重写 agent frontmatter model 字段（preset/custom/inherit）
 
+平台清单数据驱动（add-claudecode-platform D5）：--platform 不再硬编码枚举，
+接受任意值并在加载 budget-models.json 后校验 ∈ platforms 键集（新增平台零
+代码）。resolve 平台策略仅 opencode 特判 provider/model，其余平台（codebuddy
+/claudecode 及后续）统一走 catalog_id 裸 ID 默认策略；frontmatter 读写仅触碰
+model 一行（claudecode camelCase 键 permissionMode/maxTurns 等不受影响，
+model 键名与中立源一致）。
+
 角色名映射：agent 文件名（连字符，coder-lite）与 model_role 键（下划线，
 coder_lite）经 budget-models.json 的 roles 键集双向校验，仅已知角色参与
 重写，未知角色报错跳过。
@@ -75,13 +82,29 @@ def _unknown_input_message(name: str, aliases: dict) -> str:
     return f'未知模型名: {name}（不在别名表与模型目录中）\n可用别名: {available}'
 
 
+def validate_platform(data: dict, platform: str) -> str | None:
+    """校验 --platform 值 ∈ budget-models.json platforms 键集（数据驱动）。
+
+    与使用语境一致的最小动态化方案：运行时安装形态无 core/platform/*.yaml
+    可 glob，平台真值源即 budget-models.json 的 platforms 键集（构建期已做
+    双清单一致性校验）。返回错误信息或 None。
+    """
+    platforms = data.get('platforms', {})
+    if platform not in platforms:
+        available = ', '.join(sorted(platforms)) or '（无）'
+        return (f'未知平台: {platform}（不在 budget-models.json platforms 键集），'
+                f'可用: {available}')
+    return None
+
+
 def resolve_model(name: str, platform: str, data: dict,
                    custom: bool = False) -> tuple[str | None, str | None]:
     """解析输入为平台最终 model 值。
 
-    codebuddy：别名/裸 ID → 裸 ID；provider/model 形态原样保留（第三方模型
-        如 presence-glm/glm-5.3、方舟 volcengine 接入等，信任用户，不剥离）。
-    opencode：别名/裸 ID → 经 provider_map 转换为 provider/model；
+    codebuddy/claudecode（默认策略，catalog_id 裸 ID）：别名/裸 ID → 裸 ID；
+        provider/model 形态原样保留（第三方模型如 presence-glm/glm-5.3、方舟
+        volcengine 接入等，信任用户，不剥离）。
+    opencode（特判）：别名/裸 ID → 经 provider_map 转换为 provider/model；
         provider/model 形态直接使用。
 
     custom=True 时：未知输入（不在别名表与预算目录）原样返回，支持用户已
@@ -127,9 +150,10 @@ def resolve_model(name: str, platform: str, data: dict,
             return None, f'厂商组 {vendor} 缺少 provider_map 映射（budget-models.json 数据异常）'
         return f'{provider}/{bare}', None
 
-    # codebuddy：provider/model 形态——若裸 ID 已在预算目录/别名中则剥离为裸 ID
-    # （如 zhipu/glm-5.2 → glm-5.2），否则视为第三方接入模型（方舟/Presence/讯飞等）
-    # 原样保留（如 presence-glm/glm-5.3 → presence-glm/glm-5.3，信任用户配置）
+    # codebuddy/claudecode（默认策略）：provider/model 形态——若裸 ID 已在预算
+    # 目录/别名中则剥离为裸 ID（如 zhipu/glm-5.2 → glm-5.2），否则视为第三方
+    # 接入模型（方舟/Presence/讯飞等）原样保留（如 presence-glm/glm-5.3 →
+    # presence-glm/glm-5.3，信任用户配置）
     if '/' in text:
         bare_part = text.rsplit('/', 1)[1]
         if bare_part in id_lower or bare_part in alias_lower:
@@ -354,23 +378,25 @@ def main() -> None:
 
     p_resolve = sub.add_parser('resolve', help='解析别名/ID → 平台最终 model 值')
     p_resolve.add_argument('--input', required=True, help='输入（别名/裸 ID/provider-model）')
-    p_resolve.add_argument('--platform', required=True, choices=('codebuddy', 'opencode'))
+    # --platform 接受任意值，main 入口按 budget-models.json platforms 键集
+    # 校验（数据驱动，与 build.py 构建期 glob 双清单一致性校验呼应）
+    p_resolve.add_argument('--platform', required=True)
     p_resolve.add_argument('--custom', action='store_true',
                            help='自定义覆写模式：未知模型 ID 原样返回（支持第三方模型）')
 
     p_preset = sub.add_parser('preset', help='预设档位查询（agent=模型 行）')
     p_preset.add_argument('--name', required=True, help='预设名')
-    p_preset.add_argument('--platform', required=True, choices=('codebuddy', 'opencode'))
+    p_preset.add_argument('--platform', required=True)
 
     p_list = sub.add_parser('list-presets', help='列出平台全部预设明细')
-    p_list.add_argument('--platform', required=True, choices=('codebuddy', 'opencode'))
+    p_list.add_argument('--platform', required=True)
 
     p_current = sub.add_parser('current', help='当前 agent model 值查询（agent=模型 行）')
     p_current.add_argument('--agents-dir', required=True, help='agent 目录路径')
 
     p_rewrite = sub.add_parser('rewrite', help='批量重写 agent frontmatter model 字段')
     p_rewrite.add_argument('--agents-dir', required=True, help='agent 目录路径')
-    p_rewrite.add_argument('--platform', required=True, choices=('codebuddy', 'opencode'))
+    p_rewrite.add_argument('--platform', required=True)
     p_rewrite.add_argument('--mode', required=True, choices=('preset', 'custom', 'inherit'),
                            help='重写模式')
     p_rewrite.add_argument('--preset', default='', help='预设名（mode=preset 时必填）')
@@ -378,6 +404,14 @@ def main() -> None:
 
     args = parser.parse_args()
     data = load_json(args.models)
+
+    # 平台校验（数据驱动：携带 --platform 的子命令统一校验，未知值报错并列出
+    # 可用平台——与 build.py「未知 --platform 值显式报错」口径一致）
+    if getattr(args, 'platform', None) is not None:
+        error = validate_platform(data, args.platform)
+        if error:
+            print(f'error: {error}', file=sys.stderr)
+            sys.exit(1)
 
     if args.action == 'resolve':
         value, error = resolve_model(args.input, args.platform, data,

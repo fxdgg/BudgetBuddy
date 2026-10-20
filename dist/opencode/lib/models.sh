@@ -2,7 +2,7 @@
 # BudgetBuddy model catalog（design.md §7 / §8.1 models 子命令）
 #
 # 职责：budget setup models 完整实现——模型目录表格（paid/free 分组 + 倍率 +
-# 档位 + 适用角色推荐 + 平台可用性 + 别名速查 + 双平台预设概览）。
+# 档位 + 适用角色推荐 + 平台可用性 + 别名速查 + 多平台预设概览）。
 # 依赖调用方（setup.sh）提供：$BUDGET_PYTHON、$BUDGET_MODELS_FILE、
 # budget_print_*（colors.sh）。
 # 分发约定：lib/models.sh 就位时 setup.sh 调用 do_models（本文件）；未就位时
@@ -30,20 +30,29 @@ except (OSError, ValueError) as exc:
     raise SystemExit(1)
 
 meta = data.get('_meta', {})
-unconfirmed = meta.get('unconfirmed_opencode_ids', [])
+# unconfirmed 读取（新位置优先，旧键兼容一个版本，与 build.py 读侧一致）:
+#   新: platforms.opencode.unconfirmed_ids（D1-3 迁移落点）
+#   旧: _meta.unconfirmed_opencode_ids（一个版本兼容期后移除）
+unconfirmed = (data.get('platforms', {}).get('opencode', {})
+               .get('unconfirmed_ids'))
+if unconfirmed is None:
+    unconfirmed = meta.get('unconfirmed_opencode_ids', [])
 print(f"更新于: {meta.get('updated_at', '-')}（更新命令: {meta.get('update_command', '-')}）")
 if unconfirmed:
     print(f'注意: {len(unconfirmed)} 个 opencode 预设 ID 待官方清单核对'
-          '（详见 _meta.unconfirmed_opencode_ids）')
+          '（详见 platforms.opencode.unconfirmed_ids）')
 print('')
 
 
 def platform_mark(platforms):
-    """平台可用性短标：双平台 / cb / oc。"""
-    if len(platforms) >= 2:
-        return '双平台'
+    """平台可用性短标：N 平台（计数动态）/ cb / oc / cc。"""
+    count = len(platforms)
+    if count >= 2:
+        # 计数文案动态化（双平台/三平台/…），随 platforms 键集自动扩展
+        return {2: '双平台', 3: '三平台'}.get(count, '%d 平台' % count)
     if platforms:
-        return {'codebuddy': 'cb', 'opencode': 'oc'}.get(platforms[0], platforms[0])
+        return {'codebuddy': 'cb', 'opencode': 'oc',
+                'claudecode': 'cc'}.get(platforms[0], platforms[0])
     return '-'
 
 

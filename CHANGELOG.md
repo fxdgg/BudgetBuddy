@@ -4,6 +4,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-10-20
+
+### Added
+
+- **Claude Code platform support** — third platform built from the same neutral source: `core/platform/claudecode.yaml` mapping DSL, `dist/claudecode/` artifacts (`.claude/` layout with agents/commands/skills, `CLAUDE.fragment.md` rules fragment merged into CLAUDE.md marked block), `/budget:start` entry point, camelCase agent frontmatter (`permissionMode` / `maxTurns`), three presets per role (economic→haiku / balanced→sonnet / quality→opus series)
+- **Data-driven platform list in build.py** — platform enumeration derived from `core/platform/*.yaml` glob plus consistency check against `budget-models.json` `platforms` key set (bidirectional mismatch fails the build); future platforms require zero converter code
+
+### Changed
+
+- **Installer platform selection** — interactive menu now offers four choices (CodeBuddy / OpenCode / Claude Code / All); `BUDGET_PLATFORM=claudecode|all` supported in non-interactive mode; local install manifest writes `platform_files` with per-platform namespacing (merged write keeps other platforms' entries, multi-platform co-install into `~/.budgetbuddy/` is non-destructive)
+- **Runtime management plane** — `platform.sh` five-level detection (`.claude/agents/` project and global levels added, explicit `BUDGET_PLATFORM=claudecode` branch); notify / quickstart / models / preset / uninstall / validate subcommands claudecode-aware
+- **Claude Code preset model IDs switched to the 5.5 series** — economic→`claude-haiku-5-5`, balanced→`claude-sonnet-5-5`, quality→`claude-opus-5-5` (old 4.5/4.6/4.8-1m IDs retired or unrecognized on the CLI); all three verified in a real Claude Code 2.1.304 environment on 2026-10-20 (zero warnings, `platforms.claudecode.unconfirmed_ids` cleared)
+
+### Known Limitations
+
+- Claude Code hooks notifications not shipped in this release (`budget notify` CLI remains available); adaptation deferred to a future change
+
+### Tests
+
+- 637 → 676 test cases (+39: build / preset / installer / platform claudecode coverage)
+
 ## [0.1.0] - 2026-10-18
 
 First full release.

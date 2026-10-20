@@ -94,13 +94,17 @@ def write_agents(root, body='你是 {{TASK_TOOL}} 执行者，负责示例任务
         target.write_text(make_agent_md(row, body), encoding='utf-8')
 
 
+PLATFORMS_TRIPLE = ('codebuddy', 'opencode', 'claudecode')
+
+
 def make_models_json():
     """生成测试用 budget-models.json 数据（完整结构，通过构建期结构校验）。
 
     目录条目 id 形如 cb-<role 连字符形式>（与真实目录 ID 形态一致，无下划线）；
-    codebuddy 预设值即该 ID，opencode 预设值为 deepseek/<id>（provider ∈ 白名单
-    且 model 部分在目录中，条目 platform 含双平台）；provider_map 将 demo 组
-    映射到 deepseek provider（与 opencode 预设前缀一致）。
+    codebuddy/claudecode 预设值即该 ID（catalog_id 默认策略），opencode 预设值
+    为 deepseek/<id>（provider ∈ 白名单且 model 部分在目录中，条目 platform 含
+    三平台）；provider_map 将 demo 组映射到 deepseek provider（与 opencode 预设
+    前缀一致）。
     """
     roles = [row[1] for row in AGENT_TABLE]
     role_ids = {role: f'cb-{role.replace("_", "-")}' for role in roles}
@@ -110,7 +114,7 @@ def make_models_json():
             'tier': 'mid',
             'cost': 'x1.00',
             'tags': ['general'],
-            'platform': ['codebuddy', 'opencode'],
+            'platform': list(PLATFORMS_TRIPLE),
         }
         for role in roles
     ]
@@ -130,6 +134,9 @@ def make_models_json():
                 for preset in ('economic', 'balanced', 'quality')}},
             'opencode': {'presets': {
                 preset: {role: f'deepseek/{model_id}' for role, model_id in role_ids.items()}
+                for preset in ('economic', 'balanced', 'quality')}},
+            'claudecode': {'presets': {
+                preset: dict(role_ids)
                 for preset in ('economic', 'balanced', 'quality')}},
         },
     }
@@ -325,6 +332,44 @@ class YamlSubsetParserTests(unittest.TestCase):
             'markers': ['<!-- BudgetBuddy:begin -->', '<!-- BudgetBuddy:end -->'],
         }])
 
+    def test_real_claudecode_yaml_parses(self):
+        """真实 claudecode.yaml 全字段正确加载（camelCase emit 键 + 行内 map
+        permission_mode_rule + extra_outputs 块式 list-of-map）。"""
+        text = (PLATFORM_YAML_DIR / 'claudecode.yaml').read_text(encoding='utf-8')
+        data = build.parse_yaml(text)
+        self.assertEqual(data['platform'], 'claudecode')
+        self.assertEqual(data['output'], 'dist/claudecode')
+        self.assertEqual(data['routing']['agent'], 'agents/{name}.md')
+        self.assertEqual(data['routing']['command'], 'commands/{group}/{name}.md')
+        self.assertEqual(data['routing']['skill'], 'skills/{skill}/')
+        self.assertEqual(data['routing']['rule'], 'CLAUDE.fragment.md')
+        self.assertEqual(data['routing']['hook'], '')
+        self.assertIsNone(data['routing']['docs']['opencode-setup-notes.md'])
+        self.assertEqual(
+            data['routing']['docs']['MODEL_SELECTION.template.md'], 'docs/MODEL_SELECTION.md')
+        self.assertEqual(data['routing']['docs']['PERSONAS.md'], 'docs/PERSONAS.md')
+        emit = data['agent_frontmatter']['emit']
+        self.assertEqual(emit['name'], '{name}')
+        self.assertEqual(emit['description'], '{description}')
+        self.assertEqual(emit['model'], '{resolved_model}')
+        self.assertEqual(emit['tools'], '{tools|pascal}')
+        self.assertEqual(emit['permissionMode'], '{permission_mode}')
+        self.assertEqual(emit['maxTurns'], '{max_turns}')
+        self.assertEqual(data['agent_frontmatter']['permission_mode_rule'],
+                         {'edit_all': 'acceptEdits', 'edit_restricted': 'plan'})
+        self.assertEqual(data['agent_frontmatter']['drop'], ['model_role', 'permissions'])
+        self.assertEqual(data['command_frontmatter']['emit'], ['description', 'argument-hint'])
+        self.assertEqual(data['command_frontmatter']['drop'], ['name'])
+        self.assertEqual(data['command']['invoke'], '/{group}:{name}')
+        self.assertEqual(data['body_variables']['TASK_TOOL'], 'Task')
+        self.assertEqual(data['body_variables']['SKILL_NS'], '')
+        self.assertEqual(data['extra_outputs'], [{
+            'kind': 'agents_fragment',
+            'source': 'rules/**',
+            'dest': 'CLAUDE.fragment.md',
+            'markers': ['<!-- BudgetBuddy:begin -->', '<!-- BudgetBuddy:end -->'],
+        }])
+
 
 class DslValidationTests(unittest.TestCase):
     """DSL schema 校验（§3.5）。"""
@@ -345,8 +390,8 @@ class DslValidationTests(unittest.TestCase):
         self.assertIn('agent', str(ctx.exception))
 
     def test_real_yamls_valid(self):
-        """真实两份 yaml 均通过 DSL schema 校验。"""
-        for name in ('codebuddy.yaml', 'opencode.yaml'):
+        """真实三份 yaml 均通过 DSL schema 校验。"""
+        for name in ('codebuddy.yaml', 'opencode.yaml', 'claudecode.yaml'):
             dsl = build.parse_yaml((PLATFORM_YAML_DIR / name).read_text(encoding='utf-8'))
             result = build.validate_dsl(dsl, name)
             self.assertIs(result, dsl)
@@ -958,7 +1003,7 @@ class ModelsValidationTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
         core = root / 'core'
-        for name in ('codebuddy.yaml', 'opencode.yaml'):
+        for name in ('codebuddy.yaml', 'opencode.yaml', 'claudecode.yaml'):
             dest = core / 'platform' / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(PLATFORM_YAML_DIR / name, dest)
@@ -1065,8 +1110,8 @@ class BuildPipelineTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
         self.core = self.root / 'core'
-        # 复制真实 platform yaml 到临时仓库。
-        for name in ('codebuddy.yaml', 'opencode.yaml'):
+        # 复制真实 platform yaml 到临时仓库（三平台）。
+        for name in ('codebuddy.yaml', 'opencode.yaml', 'claudecode.yaml'):
             dest = self.core / 'platform' / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(PLATFORM_YAML_DIR / name, dest)
@@ -1435,6 +1480,205 @@ class BuildPipelineTests(unittest.TestCase):
         proc = run_build(self.root)
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn('core/agents/broken.md', proc.stderr)
+
+
+class ClaudecodeBuildTests(unittest.TestCase):
+    """claudecode 平台构建产物（specs/claudecode-platform 各 Scenario）。
+
+    三平台数据就位的临时仓库（三 yaml + 三平台 models.json + 全量 agents），
+    覆盖 camelCase emit、CLAUDE.fragment.md 合并、命令产物、hooks 降级、
+    幂等与选择性构建；另含平台数据驱动用例（specs/build-pipeline
+    「平台清单数据驱动」：platform 键集自洽 / 未知 --platform / 双清单漂移）。
+    """
+
+    RULE_STEMS = tuple(f'budget-rule-{i:02d}' for i in range(1, 13))
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.core = self.root / 'core'
+        for name in ('codebuddy.yaml', 'opencode.yaml', 'claudecode.yaml'):
+            dest = self.core / 'platform' / name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(PLATFORM_YAML_DIR / name, dest)
+        for category in ('agents', 'skills', 'commands', 'rules',
+                         'models', 'personas', 'lib', 'docs', 'hooks'):
+            (self.core / category).mkdir(parents=True, exist_ok=True)
+        write_agents(self.root)
+        write_full_models(self.root)
+        # 12 条 rule（fragment 二级标记断言基准）。
+        for stem in self.RULE_STEMS:
+            (self.core / 'rules' / f'{stem}.md').write_text(
+                f'{stem} 规则内容。\n', encoding='utf-8')
+        # 命令（budget 组含 argument-hint；opsx 组无）。
+        self.write_file('core/commands/budget/start.md',
+                        '---\nname: "Budget: Start"\ndescription: 启动工作流。\n'
+                        'argument-hint: "<需求描述>"\n---\n使用 {{TASK_TOOL}} 启动。\n')
+        self.write_file('core/commands/opsx/apply.md',
+                        '---\nname: "Opsx: Apply"\ndescription: 应用变更。\n---\n正文。\n')
+        # hooks（仅 codebuddy 分发；claudecode 空串降级不分发）。
+        self.write_file('core/hooks/budget-notify-hook.py', '#!/usr/bin/env python3\n')
+
+    def write_file(self, relpath, text):
+        target = self.root / relpath
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding='utf-8')
+
+    def build_all(self):
+        proc = run_build(self.root)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc
+
+    def test_agent_frontmatter_camelcase_emit(self):
+        """camelCase emit：architect（受限编辑）→ permissionMode: plan、maxTurns: 80，
+        tools PascalCase，无 model_role/permissions/max_turns 中立键。"""
+        self.build_all()
+        text = (self.root / 'dist' / 'claudecode' / 'agents' / 'architect.md').read_text(
+            encoding='utf-8')
+        self.assertIn('name: architect\n', text)
+        self.assertIn('description: architect 角色示例，用于构建管线验证。\n', text)
+        self.assertIn('model: cb-architect\n', text)
+        self.assertIn(
+            'tools: [Read, Write, Edit, Bash, Grep, Glob, WebFetch, WebSearch]\n', text)
+        self.assertIn('permissionMode: plan\n', text)
+        self.assertIn('maxTurns: 80\n', text)
+        self.assertNotIn('model_role', text)
+        self.assertNotIn('permissions', text)
+        self.assertNotIn('max_turns', text)
+
+    def test_agent_frontmatter_camelcase_accept_edits(self):
+        """camelCase emit：coder-lite（edit 全放开）→ permissionMode: acceptEdits。"""
+        self.build_all()
+        text = (self.root / 'dist' / 'claudecode' / 'agents' / 'coder-lite.md').read_text(
+            encoding='utf-8')
+        self.assertIn('permissionMode: acceptEdits\n', text)
+        self.assertIn('maxTurns: 35\n', text)
+        self.assertIn('model: cb-coder-lite\n', text)
+
+    def test_baked_model_balanced_preset_all_agents(self):
+        """构建烘焙：全部 agent 的 model = claudecode balanced 预设对应 ID。"""
+        self.build_all()
+        models = make_models_json()
+        balanced = models['platforms']['claudecode']['presets']['balanced']
+        for row in AGENT_TABLE:
+            text = (self.root / 'dist' / 'claudecode' / 'agents' / f'{row[0]}.md').read_text(
+                encoding='utf-8')
+            self.assertIn(f"model: {balanced[row[1]]}\n", text, row[0])
+
+    def test_fragment_outer_and_twelve_rule_markers(self):
+        """CLAUDE.fragment.md：外层 BudgetBuddy 标记 + 12 条 rule 二级标记。"""
+        self.build_all()
+        fragment = self.root / 'dist' / 'claudecode' / 'CLAUDE.fragment.md'
+        self.assertTrue(fragment.is_file())
+        text = fragment.read_text(encoding='utf-8')
+        self.assertTrue(text.startswith('<!-- BudgetBuddy:begin -->'))
+        self.assertIn('<!-- BudgetBuddy:end -->', text)
+        for stem in self.RULE_STEMS:
+            self.assertIn(f'<!-- {stem}:begin -->', text, stem)
+            self.assertIn(f'<!-- {stem}:end -->', text, stem)
+        # begin 标记总数 = 1 外层 + 12 rule。
+        self.assertEqual(text.count(':begin -->'), 13)
+        self.assertEqual(text.count(':end -->'), 13)
+
+    def test_command_product_frontmatter_and_routing(self):
+        """命令产物：commands/{group}/{name}.md 落位，frontmatter 仅
+        description/argument-hint（无 name），TASK_TOOL 替换为 Task。"""
+        self.build_all()
+        start = self.root / 'dist' / 'claudecode' / 'commands' / 'budget' / 'start.md'
+        self.assertTrue(start.is_file())
+        text = start.read_text(encoding='utf-8')
+        self.assertIn('description: 启动工作流。\n', text)
+        self.assertIn('argument-hint: <需求描述>\n', text)
+        self.assertNotIn('name:', text)
+        self.assertIn('使用 Task 启动。', text)
+        self.assertNotIn('{{TASK_TOOL}}', text)
+        self.assertTrue(
+            (self.root / 'dist' / 'claudecode' / 'commands' / 'opsx' / 'apply.md').is_file())
+
+    def test_hooks_not_distributed(self):
+        """hooks 降级：routing.hook 空串 → dist/claudecode 无 hooks 文件，
+        构建不因 core/hooks 有文件而失败（走既有告警路径）。"""
+        proc = self.build_all()
+        self.assertFalse((self.root / 'dist' / 'claudecode' / 'hooks').exists())
+        self.assertIn('hooks', proc.stderr)
+
+    def test_repeated_build_three_platforms_stable(self):
+        """泛化回归：三平台连续两次构建，manifest 与产物树逐字节一致。"""
+        self.build_all()
+        first_tree = snapshot_tree(self.root / 'dist')
+        first_manifests = {
+            platform: (self.root / 'dist' / platform / '.manifest.json').read_text(
+                encoding='utf-8')
+            for platform in PLATFORMS_TRIPLE}
+        self.build_all()
+        second_tree = snapshot_tree(self.root / 'dist')
+        self.assertEqual(first_tree, second_tree)
+        for platform, text in first_manifests.items():
+            self.assertEqual(
+                text,
+                (self.root / 'dist' / platform / '.manifest.json').read_text(encoding='utf-8'),
+                platform)
+
+    def test_selective_build_claudecode_keeps_other_platforms(self):
+        """--platform claudecode：仅重建 claudecode，其余两平台产物不变。"""
+        self.build_all()
+        cb_before = snapshot_tree(self.root / 'dist' / 'codebuddy')
+        oc_before = snapshot_tree(self.root / 'dist' / 'opencode')
+        proc = run_build(self.root, '--platform', 'claudecode')
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(cb_before, snapshot_tree(self.root / 'dist' / 'codebuddy'))
+        self.assertEqual(oc_before, snapshot_tree(self.root / 'dist' / 'opencode'))
+
+    # ----- 平台数据驱动（specs/build-pipeline「平台清单数据驱动」） -----
+
+    def test_platform_entry_out_of_keys_fails_build(self):
+        """platform 键集自洽：条目 platform 含键集外值 → 构建失败指出条目与键集。"""
+        data = make_models_json()
+        data['models']['paid']['demo'][0]['platform'] = list(PLATFORMS_TRIPLE) + ['ghost']
+        target = self.core / 'models' / 'budget-models.json'
+        target.write_text(json.dumps(data), encoding='utf-8')
+        proc = run_build(self.root)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn('platform 取值须 ∈ budget-models.json platforms 键集', proc.stderr)
+        # 报错定位条目（models.paid.demo）并列出合法键集。
+        self.assertIn('models.paid.demo', proc.stderr)
+        for platform in PLATFORMS_TRIPLE:
+            self.assertIn(platform, proc.stderr)
+
+    def test_unknown_platform_flag_errors(self):
+        """未知 --platform：非零退出并列出可用平台清单。"""
+        proc = run_build(self.root, '--platform', 'ghost')
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn('未知平台 ghost', proc.stderr)
+        self.assertIn('可用平台', proc.stderr)
+        for platform in PLATFORMS_TRIPLE:
+            self.assertIn(platform, proc.stderr)
+
+    def test_dual_list_drift_yaml_missing_side_fails(self):
+        """双清单漂移：yaml 侧缺失某平台（models platforms 键集独有）→
+        构建失败并列出差异，不静默跳过。"""
+        (self.core / 'platform' / 'claudecode.yaml').unlink()
+        proc = run_build(self.root)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn('平台双清单不一致', proc.stderr)
+        self.assertIn('claudecode', proc.stderr)
+
+    def test_dual_list_drift_data_missing_side_fails(self):
+        """双清单漂移：models platforms 键集缺失某平台（yaml 独有）→
+        构建失败并列出差异。"""
+        data = make_models_json()
+        del data['platforms']['claudecode']
+        # 条目 platform 同步收窄，聚焦双清单一致性报错本身。
+        for entries in data['models']['paid'].values():
+            for entry in entries:
+                entry['platform'] = ['codebuddy', 'opencode']
+        target = self.core / 'models' / 'budget-models.json'
+        target.write_text(json.dumps(data), encoding='utf-8')
+        proc = run_build(self.root)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn('平台双清单不一致', proc.stderr)
+        self.assertIn('claudecode', proc.stderr)
 
 
 class P0ConsistencyUnitTests(unittest.TestCase):

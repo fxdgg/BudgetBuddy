@@ -46,10 +46,24 @@ router.md 定义任务复杂度评估与 coder 三级（lite/standard/senior）�
 #### Scenario: 3 轮驳回应急
 - **WHEN** 同一任务累计 3 轮审查驳回
 - **THEN** 工作流按应急路径升级处理（换更高级 coder 或 Director 介入），并发对应通知
-
 #### Scenario: Director 只读终裁
+
 - **WHEN** 分歧升级至 director agent
 - **THEN** director 仅基于只读信息输出六类裁决之一，不执行任何写操作（对应 §6 权限）
+
+### Requirement: Review Gate 可选 OCR 机器预审
+
+Review Gate（reviewer + reviewer-b 交叉复核）阶段 SHALL 支持可选的 OpenCodeReview（开源 `ocr` CLI）机器预审：双 reviewer 在启动审查时按 ocr-pre-review capability 的探测与降级语义尝试获取结构化预审结果，作为各自审查维度的辅助输入（detector），最终裁决权保留在 reviewer agent（judge）；预审缺失或失败 MUST NOT 影响 Review Gate 的既有语义——3 轮驳回应急、Director 六类裁决、通知节点 N1-N11 联动均不变。本条属提示词行为约束，验收方式为人工审计 + 构建产物一致性校验，不设自动化用例（人工审计为该豁免项的验收方式）。【MUST】
+
+#### Scenario: 预审缺失不影响应急语义
+
+- **WHEN** 同一任务累计 3 轮审查驳回且环境中无 `ocr` CLI
+- **THEN** 3 轮驳回应急路径（升级 coder 级别/Director 介入）与对应通知行为与集成前完全一致
+
+#### Scenario: 预审结果进入双审分工
+
+- **WHEN** 预审返回 security 与 test 类 finding
+- **THEN** security 类由 reviewer-b 深度验证、test 类由 reviewer-b 按测试逻辑独立验证职责处理，主审不重复审查
 
 ### Requirement: goal loop
 

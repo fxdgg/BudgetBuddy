@@ -1,0 +1,46 @@
+{
+  "rules": [
+    {
+      "path": "**/*.go",
+      "merge_system_rule": true,
+      "rule": "按 budget-go-style 检查：error 须处理并以 %w 包装；禁业务 panic，recover 限 defer 内按类型；defer 紧随资源获取、禁循环内 defer；导出名须注释、函数≤80 行；接收器禁 this。",
+      "source": "budget-go-style"
+    },
+    {
+      "path": "**/*.py",
+      "merge_system_rule": true,
+      "rule": "按 budget-python-style 检查：禁裸 except 与无豁免 except Exception；禁可变默认参数与 import *；with 管理文件与连接；禁函数内 import、循环拼字符串；圈复杂度≤20。",
+      "source": "budget-python-style"
+    },
+    {
+      "path": "**/*.{ts,tsx,js,jsx,vue}",
+      "merge_system_rule": true,
+      "rule": "按 budget-typescript-style 检查：禁 var 与 ==/!=、语句须分号；禁 import * 与 require；Promise 条件须 await；类型断言用 as、禁 namespace；类成员须显式修饰符。",
+      "source": "budget-typescript-style"
+    },
+    {
+      "path": "**/*.java",
+      "merge_system_rule": true,
+      "rule": "按 budget-java-style 检查：禁通配符 import；finally 禁 return 并关闭资源、优先 try-with-resources；禁 BigDecimal(double)；命名遵大小写约定、禁魔法值。",
+      "source": "budget-java-style"
+    },
+    {
+      "path": "**/*.{cpp,h,hpp,c,cc,cxx}",
+      "merge_system_rule": true,
+      "rule": "按 budget-cpp-style 检查：禁 C 风格转换，智能指针替代裸 new/delete，nullptr 替 NULL；析构禁抛异常、单参构造须 explicit；常量 k 前缀、全局 g_ 前缀；行宽 120。",
+      "source": "budget-cpp-style"
+    },
+    {
+      "path": "**/*.{css,scss,less}",
+      "merge_system_rule": true,
+      "rule": "按 budget-css-style 检查：禁 !important 与 ID 选择器；2 空格缩进、冒号后一空格、右括号独占行；颜色小写、无边框用 0、字符串单引号；类名破折号 BEM；禁手写浏览器前缀。",
+      "source": "budget-css-style"
+    },
+    {
+      "path": "**/*.sql",
+      "merge_system_rule": true,
+      "rule": "按 budget-sql-style 检查：禁 select *，别名须显式 as，关键字大小写统一；命名全小写加下划线、禁保留字；4 空格缩进行宽 120；完整 SQL 须头部注释；insert 须显式字段与分区。",
+      "source": "budget-sql-style"
+    }
+  ]
+}

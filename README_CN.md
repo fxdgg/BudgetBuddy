@@ -357,6 +357,7 @@ budget setup autorun off coder-lite       # 为单个 agent 关闭 AutoRun
 | CodeBuddy | 子代理 frontmatter `enabledAutoRun: true`；4 个执行类 agent 默认开启；其余 6 个经 `budget setup autorun` 管理 |
 | OpenCode | 无需 auto-run 字段——permission map（`ask`/`allow`/`deny`）已等效：`allow` 即免审批；4 个执行类 agent 的既有权限映射已等价 |
 | Claude Code | 无每子代理 auto-run 开关；审批由会话权限模式 / `settings.json` permissions 承担——`budget setup autorun` 输出替代指引并 exit 0，不做任何改动 |
+| Codex | 无 auto-run 机制——agent 素材 frontmatter 仅 `name`/`description` 元数据；权限边界由 Leader 在 spawn prompt 中声明，会话内审批由 Codex 自身审批流程承担——`budget setup autorun` 输出指引并 exit 0，不做任何改动 |
 
 ## 消息通知
 

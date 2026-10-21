@@ -19,8 +19,13 @@ sort_keys，全局单点，不设项目级覆盖；全局固定路径先例 noti
 唯一真源（此后 IDE 手动变更不再被吸收，差异经 list 双栏暴露）。
 
 作用域：on/off 补丁落当前探测到的安装态（BUDGET_PLATFORM_KIND/BUDGET_AGENTS_DIR
-等，setup.sh 分发层 detect_platform 探测后 export 注入；未注入时本模块兜底五级
+等，setup.sh 分发层 detect_platform 探测后 export 注入；未注入时本模块兜底九级
 探测，对齐 quickstart.py）。多项目级安装需逐项目各执行一次 on/off。
+
+平台降级（D2）：opencode/claudecode/codex 三形态无 per-subagent 免审批开关，
+on/off/apply 输出替代审批机制指引后 exit 0 零修改（状态文件也不写）；list 只读
+可用。codex 素材 frontmatter 规格仅 name/description（specs/codex-platform），
+enabledAutoRun 不被读取，补丁即污染素材文档。
 
 环境变量：
     BUDGET_PLATFORM_KIND / BUDGET_PLATFORM_SCOPE / BUDGET_PLATFORM_ROOT /
@@ -55,7 +60,7 @@ AUTORUN_LINE_RE = re.compile(r'^enabledAutoRun[ \t]*:')
 # 插入位置取锚点键最后出现行之后，与构建产物字段顺序一致）
 ANCHOR_LINE_RE = re.compile(r'^(name|description|mode)[ \t]*:')
 
-# 套件 agent 名清单（兜底五级探测判定目录是否含本套件 agent，对齐 quickstart.py）
+# 套件 agent 名清单（兜底九级探测判定目录是否含本套件 agent，对齐 quickstart.py）
 SUITE_AGENTS = (
     'architect', 'coder-lite', 'coder-standard', 'coder-senior', 'reviewer',
     'reviewer-b', 'tester', 'recorder', 'director', 'goal-evaluator',
@@ -74,9 +79,16 @@ PLATFORM_GUIDANCE = {
         '  - settings.json 的 permissions.allow 规则（按命令模式放行）',
         '  - 会话权限模式（acceptEdits / bypassPermissions 等）',
     ],
+    'codex': [
+        'Codex 替代审批机制：',
+        '  - Codex 素材 frontmatter 仅 name/description，无 enabledAutoRun 开关'
+        '（写入即污染素材文档），本命令未做任何修改',
+        '  - spawn 派工权限边界：由 Leader 在派工 prompt 中显式声明',
+        '  - 会话内审批由 Codex 自身审批机制承担',
+    ],
 }
 
-# ─── 平台探测（环境变量注入优先，兜底五级探测对齐 quickstart.py）──────────────
+# ─── 平台探测（环境变量注入优先，兜底九级探测对齐 quickstart.py）──────────────
 
 
 def _has_suite_agents(directory: str) -> bool:
@@ -87,6 +99,16 @@ def _has_suite_agents(directory: str) -> bool:
         os.path.isfile(os.path.join(directory, name + '.md'))
         for name in SUITE_AGENTS
     )
+
+
+def _has_codex_skill(directory: str) -> bool:
+    """判断目录是否为 codex 套件 skill 目录（对齐 quickstart.py / platform.sh：
+    目录名 budget-workflow + SKILL.md 存在双条件，防同名目录误判）。"""
+    if not os.path.isdir(directory):
+        return False
+    if os.path.basename(os.path.realpath(directory)) != 'budget-workflow':
+        return False
+    return os.path.isfile(os.path.join(directory, 'SKILL.md'))
 
 
 def _walk_up(predicate: Callable[[str], bool], max_levels: int = 10) -> str | None:
@@ -102,8 +124,9 @@ def _walk_up(predicate: Callable[[str], bool], max_levels: int = 10) -> str | No
 
 
 def _fallback_detect_platform() -> dict:
-    """兜底五级探测（BUDGET_PLATFORM 显式 > codebuddy 项目 > codebuddy 全局 >
-    claudecode 项目 > claudecode 全局 > opencode 项目 > opencode 全局 > unknown）。
+    """兜底九级探测（BUDGET_PLATFORM 显式 > codebuddy 项目 > codebuddy 全局 >
+    claudecode 项目 > claudecode 全局 > codex 项目 > codex 全局 > opencode 项目 >
+    opencode 全局 > unknown）。
 
     与 quickstart.py _detect_platform 同构；仅在 setup.sh 未注入形态变量时生效
     （直调 / 冒烟 / 测试场景）。返回 {kind, scope, root, agents_dir}。
@@ -111,10 +134,12 @@ def _fallback_detect_platform() -> dict:
     home = os.path.expanduser('~')
     result = {'kind': 'unknown', 'scope': '', 'root': '', 'agents_dir': ''}
     explicit = os.environ.get('BUDGET_PLATFORM', '')
-    if explicit in ('codebuddy', 'claudecode', 'opencode'):
+    if explicit in ('codebuddy', 'claudecode', 'codex', 'opencode'):
         agents_dir = {
             'codebuddy': os.path.join(home, '.codebuddy', 'agents'),
             'claudecode': os.path.join(home, '.claude', 'agents'),
+            'codex': os.path.join(home, '.codex', 'skills',
+                                  'budget-workflow', 'agents'),
             'opencode': os.path.join(home, '.config', 'opencode', 'agent'),
         }[explicit]
         result.update(kind=explicit, scope='global', agents_dir=agents_dir)
@@ -129,16 +154,31 @@ def _fallback_detect_platform() -> dict:
         result.update(kind='codebuddy', scope='global',
                       agents_dir=os.path.join(home, '.codebuddy', 'agents'))
         return result
-    for kind, rel in (('claudecode', os.path.join('.claude', 'agents')),
-                      ('opencode', os.path.join('.opencode', 'agent'))):
-        root = _walk_up(lambda d, rel=rel: _has_suite_agents(os.path.join(d, rel)))
-        if root:
-            result.update(kind=kind, scope='project', root=root,
-                          agents_dir=os.path.join(root, rel))
-            return result
+    root = _walk_up(lambda d: _has_suite_agents(os.path.join(d, '.claude', 'agents')))
+    if root:
+        result.update(kind='claudecode', scope='project', root=root,
+                      agents_dir=os.path.join(root, '.claude', 'agents'))
+        return result
     if _has_suite_agents(os.path.join(home, '.claude', 'agents')):
         result.update(kind='claudecode', scope='global',
                       agents_dir=os.path.join(home, '.claude', 'agents'))
+        return result
+    root = _walk_up(lambda d: _has_codex_skill(
+        os.path.join(d, '.codex', 'skills', 'budget-workflow')))
+    if root:
+        result.update(kind='codex', scope='project', root=root,
+                      agents_dir=os.path.join(root, '.codex', 'skills',
+                                              'budget-workflow', 'agents'))
+        return result
+    if _has_codex_skill(os.path.join(home, '.codex', 'skills', 'budget-workflow')):
+        result.update(kind='codex', scope='global',
+                      agents_dir=os.path.join(home, '.codex', 'skills',
+                                              'budget-workflow', 'agents'))
+        return result
+    root = _walk_up(lambda d: _has_suite_agents(os.path.join(d, '.opencode', 'agent')))
+    if root:
+        result.update(kind='opencode', scope='project', root=root,
+                      agents_dir=os.path.join(root, '.opencode', 'agent'))
         return result
     if _has_suite_agents(os.path.join(home, '.config', 'opencode', 'agent')):
         result.update(kind='opencode', scope='global',
@@ -149,7 +189,7 @@ def _fallback_detect_platform() -> dict:
 
 def resolve_platform() -> dict:
     """形态解析：BUDGET_PLATFORM_KIND 等环境变量（setup.sh 分发前 export）优先；
-    未注入时兜底五级探测。kind=unknown 表示五级探测均未命中。"""
+    未注入时兜底九级探测。kind=unknown 表示九级探测均未命中。"""
     kind = os.environ.get('BUDGET_PLATFORM_KIND', '')
     if kind:
         return {
@@ -428,8 +468,9 @@ def cmd_list(args: argparse.Namespace) -> int:
     platform = resolve_platform()
     kind = platform['kind']
     if kind == 'unknown':
-        print('  未检测到安装形态（五级探测未命中）。on/off/apply 需先安装 BudgetBuddy'
-              ' 或以 BUDGET_PLATFORM=codebuddy|claudecode|opencode 显式指定；list 只读可用。')
+        print('  未检测到安装形态（九级探测未命中）。on/off/apply 需先安装 BudgetBuddy'
+              ' 或以 BUDGET_PLATFORM=codebuddy|claudecode|codex|opencode 显式指定；'
+              'list 只读可用。')
         return 0
     if kind in PLATFORM_GUIDANCE:
         print(f'  平台 {kind}:{platform["scope"]} 无 AutoRun 机制'
@@ -481,10 +522,10 @@ def cmd_on_off(args: argparse.Namespace, enable: bool) -> int:
     kind = platform['kind']
 
     if kind == 'unknown':
-        print('error: 未检测到 BudgetBuddy 安装形态（五级探测未命中），无法定位 agent 目录',
+        print('error: 未检测到 BudgetBuddy 安装形态（九级探测未命中），无法定位 agent 目录',
               file=sys.stderr)
         print('提示：请先完成安装（budget setup init 或 install.sh），'
-              '或设置 BUDGET_PLATFORM=codebuddy|claudecode|opencode 显式指定平台后重试',
+              '或设置 BUDGET_PLATFORM=codebuddy|claudecode|codex|opencode 显式指定平台后重试',
               file=sys.stderr)
         return 1
     if kind in PLATFORM_GUIDANCE:
@@ -575,9 +616,9 @@ def cmd_apply(args: argparse.Namespace) -> int:
     kind = platform['kind']
 
     if kind == 'unknown':
-        print('error: 未检测到 BudgetBuddy 安装形态（五级探测未命中），无法重放 AutoRun 状态',
+        print('error: 未检测到 BudgetBuddy 安装形态（九级探测未命中），无法重放 AutoRun 状态',
               file=sys.stderr)
-        print('提示：请先完成安装，或设置 BUDGET_PLATFORM=codebuddy|claudecode|opencode 显式指定',
+        print('提示：请先完成安装，或设置 BUDGET_PLATFORM=codebuddy|claudecode|codex|opencode 显式指定',
               file=sys.stderr)
         return 1
     if kind in PLATFORM_GUIDANCE:

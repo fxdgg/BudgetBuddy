@@ -357,6 +357,7 @@ budget setup autorun off coder-lite       # turn AutoRun off for one agent
 | CodeBuddy | Subagent frontmatter `enabledAutoRun: true`; the 4 execution agents default on; the other 6 are managed via `budget setup autorun` |
 | OpenCode | No auto-run field needed — the permission map (`ask`/`allow`/`deny`) already expresses it: `allow` = approval-free; the 4 execution agents' existing permission mappings are already equivalent |
 | Claude Code | No per-sub-agent auto-run switch; approval is handled by the session permission mode / `settings.json` permissions — `budget setup autorun` prints the alternative guidance and exits 0 without changing anything |
+| Codex | No auto-run mechanism — agent material frontmatter carries only `name`/`description` metadata; permission boundaries are declared by the Leader in the spawn prompt, and in-session approval is handled by Codex's own approval flow — `budget setup autorun` prints this guidance and exits 0 without changing anything |
 
 ## Notifications
 

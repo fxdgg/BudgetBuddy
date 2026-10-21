@@ -13,11 +13,14 @@
 ⑤ apply 全量对齐（清单内 on/清单外 off）；
 ⑥ 损坏 JSON 非零退出且状态文件字节不变；
 ⑦ unknown 形态 on/off 非零退出、list exit 0；
-⑧ opencode/claudecode 降级 exit 0 零文件修改（mtime/内容双核验）；
+⑧ opencode/claudecode/codex 降级 exit 0 零文件修改（mtime/内容双核验；codex
+   素材 frontmatter 逐字节不变 + 状态文件不产生，回归 codex 形态误注入缺陷）；
 ⑨ list 双栏输出解析；
 ⑩ list 遇损坏状态文件只读展示（状态栏明示损坏 + 修复路径、退出码 0、字节不变）；
 ⑪ on 输出 bash 模式取自 .bash-patterns.json（存在时列目标 agent 模式；
-   缺失时降级通用提示且开启照常完成）。
+   缺失时降级通用提示且开启照常完成）；
+⑫ 兜底九级探测 codex 识别（BUDGET_PLATFORM=codex 显式 / codex skill 目录
+   walk-up 项目级），env 注入与直调两路径 codex 形态判定可靠。
 """
 
 import json
@@ -62,10 +65,12 @@ class SandboxTestCase(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def _run(self, args, kind='codebuddy', scope='project'):
+    def _run(self, args, kind='codebuddy', scope='project', extra_env=None):
         """子进程直调 autorun.py（隔离 HOME、剥离 BUDGET_*、按需注入形态变量）。
 
-        kind 为空字符串时不注入任何形态变量——走兜底五级探测（unknown 场景）。
+        kind 为空字符串时不注入任何形态变量——走兜底九级探测（unknown 场景）。
+        extra_env：追加注入的环境变量（兜底探测用例注入 BUDGET_PLATFORM 等），
+        在剥离之后注入，不受剥离影响。
         """
         env = dict(os.environ)
         env['HOME'] = str(self.home)
@@ -77,6 +82,8 @@ class SandboxTestCase(unittest.TestCase):
             env['BUDGET_PLATFORM_SCOPE'] = scope
             env['BUDGET_PLATFORM_ROOT'] = str(self.tmp)
             env['BUDGET_AGENTS_DIR'] = str(self.agents)
+        for key, value in (extra_env or {}).items():
+            env[key] = value
         return subprocess.run(
             [sys.executable, str(AUTORUN)] + args,
             cwd=str(self.tmp), env=env, capture_output=True, text=True, timeout=60,
@@ -477,7 +484,7 @@ class CorruptStateTests(SandboxTestCase):
 
 
 class UnknownFormTests(SandboxTestCase):
-    """⑦ unknown 形态（五级探测未命中）：on/off/apply 非零退出、list exit 0。"""
+    """⑦ unknown 形态（九级探测未命中）：on/off/apply 非零退出、list exit 0。"""
 
     def test_on_off_apply_nonzero_exit(self):
         for args in (['on', 'coder-lite'], ['off', 'coder-lite'], ['apply']):
@@ -485,7 +492,8 @@ class UnknownFormTests(SandboxTestCase):
             self.assertEqual(proc.returncode, 1, '%s: %s' % (args, proc.stdout))
             combined = proc.stdout + proc.stderr
             self.assertIn('未检测到', combined, args)
-            self.assertIn('BUDGET_PLATFORM=codebuddy|claudecode|opencode', combined, args)
+            self.assertIn('BUDGET_PLATFORM=codebuddy|claudecode|codex|opencode',
+                          combined, args)
             # 不写状态文件
             self.assertFalse(self._state_path().exists(), args)
 
@@ -519,6 +527,102 @@ class NonCodebuddyDegradeTests(SandboxTestCase):
         self.assertIn('无 AutoRun 机制', proc.stdout)
         self.assertIn('settings.json', proc.stdout)
         self._assert_agents_unchanged(before)
+        self.assertFalse(self._state_path().exists())
+
+
+class CodexDegradeTests(SandboxTestCase):
+    """⑧ codex 降级：on/off/apply exit 0 + 输出指引 + 素材 frontmatter 逐字节
+    不变 + 状态文件不产生/不改写（回归：codex 形态误注入 enabledAutoRun 缺陷；
+    specs/codex-platform：素材 frontmatter 仅 name/description）。"""
+
+    def test_codex_on_degrade_zero_modification(self):
+        """codex 形态 on：exit 0、输出 Codex 替代审批指引、素材逐字节不变、不写状态。"""
+        self._make_agent('reviewer')
+        before = self._snapshot_agents()
+        proc = self._run(['on', 'reviewer'], kind='codex')
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn('无 AutoRun 机制', proc.stdout)
+        self.assertIn('Codex 替代审批机制', proc.stdout)
+        self.assertIn('spawn 派工权限边界', proc.stdout)
+        self.assertIn('Codex 自身审批机制', proc.stdout)
+        # 素材 frontmatter（含整文件）逐字节不变，mtime 不变
+        self._assert_agents_unchanged(before)
+        self.assertFalse((self.agents / 'reviewer.md').read_text(
+            encoding='utf-8').count('enabledAutoRun'))
+        # 状态文件不产生
+        self.assertFalse(self._state_path().exists())
+
+    def test_codex_off_degrade_zero_modification(self):
+        """codex 形态 off：同降级语义（exit 0 + 指引 + 零修改 + 不写状态）。"""
+        self._make_agent('reviewer')
+        before = self._snapshot_agents()
+        proc = self._run(['off', 'reviewer'], kind='codex')
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn('无 AutoRun 机制', proc.stdout)
+        self.assertIn('Codex 替代审批机制', proc.stdout)
+        self._assert_agents_unchanged(before)
+        self.assertFalse(self._state_path().exists())
+
+    def test_codex_apply_degrade_state_file_untouched(self):
+        """codex 形态 apply（安装重放路径）：exit 0、既有状态文件字节不改写、素材零修改。"""
+        self._make_agent('reviewer')
+        self._write_state(['reviewer'])
+        state_before = self._state_path().read_bytes()
+        before = self._snapshot_agents()
+        proc = self._run(['apply'], kind='codex')
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn('apply 无需重放，未做任何修改', proc.stdout)
+        self.assertEqual(self._state_path().read_bytes(), state_before)
+        self._assert_agents_unchanged(before)
+
+    def test_codex_list_readonly_still_works(self):
+        """codex 形态 list：只读可用（exit 0、明示无 AutoRun 机制、不写状态文件）。"""
+        self._make_agent('reviewer')
+        before = self._snapshot_agents()
+        proc = self._run(['list'], kind='codex')
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn('═══ 全局状态清单', proc.stdout)
+        self.assertIn('平台 codex', proc.stdout)
+        self.assertIn('无 AutoRun 机制', proc.stdout)
+        self._assert_agents_unchanged(before)
+        self.assertFalse(self._state_path().exists())
+
+
+class CodexFallbackDetectTests(SandboxTestCase):
+    """⑫ 兜底九级探测 codex 识别（setup.sh 未注入形态变量时直调场景）。"""
+
+    def test_fallback_explicit_budget_platform_codex(self):
+        """BUDGET_PLATFORM=codex 显式指定：on 走 codex 降级（exit 0 + 零修改）。"""
+        self._make_agent('reviewer')
+        before = self._snapshot_agents()
+        proc = self._run(['on', 'reviewer'], kind='',
+                         extra_env={'BUDGET_PLATFORM': 'codex'})
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn('Codex 替代审批机制', proc.stdout)
+        self.assertIn('codex:global', proc.stdout)
+        self._assert_agents_unchanged(before)
+        self.assertFalse(self._state_path().exists())
+
+    def test_fallback_project_codex_skill_dir(self):
+        """codex 项目级 skill 目录（.codex/skills/budget-workflow + SKILL.md）：
+        无任何 BUDGET_* 注入时 walk-up 探测命中 codex:project，on 走降级。"""
+        skill_dir = self.tmp / '.codex' / 'skills' / 'budget-workflow'
+        (skill_dir / 'agents').mkdir(parents=True)
+        (skill_dir / 'SKILL.md').write_bytes(b'---\nname: budget-workflow\n---\n')
+        agent_path = skill_dir / 'agents' / 'reviewer.md'
+        agent_path.write_bytes(AGENT_TMPL.format(name='reviewer').encode('utf-8'))
+
+        def snapshot_skill_agents():
+            return {'reviewer.md': (agent_path.read_bytes(),
+                                    agent_path.stat().st_mtime_ns)}
+        before = snapshot_skill_agents()
+        proc = self._run(['on', 'reviewer'], kind='')
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn('Codex 替代审批机制', proc.stdout)
+        self.assertIn('codex:project', proc.stdout)
+        # 素材逐字节不变 + mtime 不变；状态文件不产生
+        self.assertEqual(snapshot_skill_agents(), before)
+        self.assertNotIn('enabledAutoRun', agent_path.read_text(encoding='utf-8'))
         self.assertFalse(self._state_path().exists())
 
 

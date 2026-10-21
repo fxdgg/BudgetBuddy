@@ -15,7 +15,7 @@ BudgetBuddy 是一套多 Agent 省钱研发工作流。它把每个任务路由�
 - **10 个专业 sub-agent** — architect、coder-lite / coder-standard / coder-senior、reviewer + reviewer-b（双审）、tester、recorder、director（终裁）、goal-evaluator
 - **五阶段工作流** — 方案设计 → 方案双审 → 分级实现 → 复审与回归 → 归档；阶段不可跳过
 - **模型三档预设** — `economic` / `balanced` / `quality`，一条命令切换；支持按 agent 的 `custom` 覆写与 `inherit`（继承主面板模型）
-- **5 套 persona 主题** — default（专业）、tech-legends、sanguo、shuihu、genshin；角色名与称呼随主题切换
+- **4 套 persona 主题** — default（专业）、tech-legends、sanguo、shuihu；角色名与称呼随主题切换
 - **执行类 agent 免审批（AutoRun）** — 4 个执行类 sub-agent（coder-lite / coder-standard / coder-senior / tester）默认开启 AutoRun（工具调用免逐条审批）；其余 agent 可用 `budget setup autorun` 管理
 - **通用 webhook 通知** — 企微机器人 / 钉钉机器人（HMAC-SHA256 加签）/ 飞书机器人（卡片）/ 自定义 webhook，11 个工作流事件开关（N1–N11）
 - **Coder Guard 护栏** — 按 coder × 任务标签记录最近 5 次成败；失败 ≥2 次自动触发分级降级
@@ -182,6 +182,55 @@ Claude Code 用户可在 `settings.json` 的 `permissions.allow` 中自行追加
 
 官方文档：<https://open-codereview.ai>
 
+## Agent 团队与角色分工
+
+Leader 编排 10 个专职 sub-agent 协同工作。每个角色在 `core/agents/` 中单一来源定义，经构建管线按平台再生。
+
+| Agent | 层级 | 职责 | 运行时机 |
+|-------|------|------|---------|
+| `leader` | 编排层 | 分析需求、组装 prompt、路由任务——**绝不写代码** | 全程 |
+| `architect` | 设计层 | 方案设计与文档撰写、闸门评审、架构决策 | 阶段 1 |
+| `reviewer` | 审查层 | 主审——代码质量、安全性、规格一致性 | 阶段 2 设计双审、每任务审查与终审 |
+| `reviewer-b` | 审查层 | 辅审——独立视角，与主审交叉复核 | 阶段 2，与主审并行 |
+| `coder-lite` | 实现层 | 低复杂度——CRUD、配置修改、样板代码、文案；成本最低 | 阶段 3，按任务标签路由 |
+| `coder-standard` | 实现层 | 中等复杂度——常规业务功能、bug 修复、API endpoint、单元测试 | 阶段 3，按任务标签路由 |
+| `coder-senior` | 实现层 | 高复杂度——架构性代码、跨模块联动、安全相关、并发处理 | 阶段 3，按任务标签路由 |
+| `tester` | 验证层 | 运行测试、验证编译、检查构建结果 | 阶段 3，每个 coder 完成后 |
+| `director` | 兜底层 | 3 轮审查全败时终裁（六类根因分型 A–F） | 仅异常路径 |
+| `goal-evaluator` | 验证层 | 目标循环的独立达成/差距判定——只读报告，不执行任何操作 | 仅 goal 循环 |
+| `recorder` | 沉淀层 | 记录开发经验、归档变更、更新文档 | 阶段 5 归档 |
+
+### 分层协作
+
+```mermaid
+flowchart TD
+    L["Leader —— 只编排不写码"] --> A["architect —— 方案设计"]
+    A --> R1["reviewer + reviewer-b —— 设计双审"]
+    R1 -->|"闸门通过"| C["coder-lite / coder-standard / coder-senior —— 分级实现"]
+    C --> T["tester —— 测试验证"]
+    T -->|"失败——自修复"| C
+    T --> R2["reviewer —— 每任务审查"]
+    R2 -->|"驳回——升级档位，最多 3 轮"| C
+    R2 -->|"通过"| REC["recorder —— 知识沉淀"]
+    R2 -.->|"3 轮全败"| D["director —— 终裁"]
+    L -.->|"goal 循环"| GE["goal-evaluator —— 达成/差距判定"]
+```
+
+完整五阶段流程图（闸门产物、循环上限、升级路径）见[架构](#架构)。
+
+### 主题分类（Persona）
+
+角色名称与称呼由主题决定——4 主题 × 11 角色；只改命名与称呼，不改变任何行为：
+
+| 主题 | 风格 | Leader / architect / coder-senior |
+|------|------|-----------------------------------|
+| `default` | 标准专业命名 | Leader / Architect / Coder-Senior |
+| `tech-legends` | 现代顶级技术工程师 | Linus Torvalds / Dennis Ritchie / Jeff Dean |
+| `sanguo` | 三国军师 + 五虎将 | 刘备 / 诸葛亮 / 关羽 |
+| `shuihu` | 梁山好汉 | 宋江 / 吴用 / 林冲 |
+
+`budget setup persona list|set|show` 查看与切换主题；`budget setup persona expand` 按当前主题渲染 agent prompt。
+
 ## 架构
 
 ```mermaid
@@ -264,6 +313,8 @@ flowchart LR
 > 典型模型取 `core/models/budget-models.json` 中各档 `coder_standard` 角色的模型 ID；完整四平台预设表在构建期生成到 `dist/<platform>/docs/MODEL_SELECTION.md`（另见 `budget setup models`）。
 >
 > Claude Code 三档预设的原生模型 ID 已于 2026-10-20 在真实 Claude Code 环境实测核对（Claude Code CLI 2.1.304，零告警）；可用 `budget setup agent custom` 覆写。
+>
+> 外部模型来源可在不改动内置文件的情况下扩充模型目录：CodeBuddy 客户端配置（`~/.codebuddy/models.json`）自动读取；`BUDGET_EXTERNAL_MODELS` 环境变量指向一个或多个 `models[]` 格式的 JSON 文件或目录（`:` 分隔，支持 `~` 展开）。外部模型 ID 由 `budget setup models` 列出，可直接用于 `budget setup agent custom <id>`。
 >
 > Codex 预设值为部署别名——使用前需在部署环境映射到实际模型。别名无法集中核对，`platforms.codex.unconfirmed_ids` 永久标注；Codex 三档内十角色统一模型。
 

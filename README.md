@@ -15,7 +15,7 @@ The kit is self-bootstrapped: this repository is developed with BudgetBuddy's ow
 - **10 specialized sub-agents** — architect, coder-lite / coder-standard / coder-senior, reviewer + reviewer-b (dual review), tester, recorder, director (final verdict), goal-evaluator
 - **Five-phase workflow** — proposal & design → dual design review → tiered implementation → final review & regression → archive; phases cannot be skipped
 - **Three-tier model presets** — `economic` / `balanced` / `quality`, one command to switch; per-agent `custom` override and `inherit` (follow the main panel model) also supported
-- **5 persona themes** — default (professional), tech-legends, sanguo, shuihu, genshin; role names and greetings change with the theme
+- **4 persona themes** — default (professional), tech-legends, sanguo, shuihu; role names and greetings change with the theme
 - **Execution agents AutoRun** — 4 execution sub-agents (coder-lite / coder-standard / coder-senior / tester) ship with AutoRun on by default (no per-call approval); `budget setup autorun` manages the rest
 - **Universal webhook notifications** — WeCom bot / DingTalk bot (HMAC-SHA256 signed) / Feishu bot (card) / custom webhook, 11 workflow event switches (N1–N11)
 - **Coder Guard** — per-coder, per-task-tag failure records over a 5-attempt window; 2+ failures trigger automatic tier downgrade
@@ -182,6 +182,55 @@ Without the CLI, a model configuration, or the rule file installed, every Budget
 
 Official documentation: <https://open-codereview.ai>
 
+## The Agent Team
+
+A Leader orchestrates 10 specialized sub-agents. Every role is defined once in `core/agents/` and rebuilt per platform by the build pipeline.
+
+| Agent | Layer | Responsibility | When it runs |
+|-------|-------|----------------|--------------|
+| `leader` | Orchestration | Analyzes requests, assembles prompts, routes tasks — **never writes code** | Entire workflow |
+| `architect` | Design | Proposal & design authoring, gate review, architecture decisions | Phase 1 |
+| `reviewer` | Review | Primary review — code quality, security, spec compliance | Phase 2 design review, per-task & final review |
+| `reviewer-b` | Review | Secondary review — independent perspective, cross-checks the primary | Phase 2, parallel with `reviewer` |
+| `coder-lite` | Implementation | Low complexity — CRUD, config edits, boilerplate, copy changes; cheapest models | Phase 3, routed by task tag |
+| `coder-standard` | Implementation | Medium complexity — business features, bug fixes, API endpoints, unit tests | Phase 3, routed by task tag |
+| `coder-senior` | Implementation | High complexity — architectural code, cross-module changes, security, concurrency | Phase 3, routed by task tag |
+| `tester` | Verification | Runs tests, verifies compilation, checks build output | Phase 3, after every coder |
+| `director` | Escalation | Final verdict when 3 review rounds all fail (root-cause classes A–F) | Exception path only |
+| `goal-evaluator` | Verification | Independent achieved/gap verdict for goal loops — reads reports, runs nothing | Goal loop only |
+| `recorder` | Knowledge | Captures lessons, archives changes, updates docs | Phase 5 archive |
+
+### Role layering
+
+```mermaid
+flowchart TD
+    L["Leader — orchestration only"] --> A["architect — design"]
+    A --> R1["reviewer + reviewer-b — dual design review"]
+    R1 -->|"gate passed"| C["coder-lite / coder-standard / coder-senior — tiered implementation"]
+    C --> T["tester — verification"]
+    T -->|"fail — self-fix"| C
+    T --> R2["reviewer — per-task review"]
+    R2 -->|"reject — tier up, max 3 rounds"| C
+    R2 -->|"pass"| REC["recorder — archive"]
+    R2 -.->|"3 rounds failed"| D["director — final verdict"]
+    L -.->|"goal loop"| GE["goal-evaluator — achieved/gap verdict"]
+```
+
+The full five-phase flowchart (gate artifacts, loop caps, escalation paths) lives in [Architecture](#architecture).
+
+### Persona themes
+
+Role names and greetings come from persona themes — 4 themes × 11 roles; only naming changes, never behavior:
+
+| Theme | Style | Leader / architect / coder-senior |
+|-------|-------|-----------------------------------|
+| `default` | Standard professional naming | Leader / Architect / Coder-Senior |
+| `tech-legends` | Modern legendary engineers | Linus Torvalds / Dennis Ritchie / Jeff Dean |
+| `sanguo` | Three Kingdoms strategists & generals | Liu Bei / Zhuge Liang / Guan Yu |
+| `shuihu` | Liangshan marsh outlaws | Song Jiang / Wu Yong / Lin Chong |
+
+`budget setup persona list|set|show` inspects and switches themes; `budget setup persona expand` renders agent prompts under the active theme.
+
 ## Architecture
 
 ```mermaid
@@ -264,6 +313,8 @@ Component-level diagrams live in [`core/docs/architecture.md`](core/docs/archite
 > Typical models are the `coder_standard` role's model ID per tier in `core/models/budget-models.json`; the full four-platform preset tables are generated at build time into `dist/<platform>/docs/MODEL_SELECTION.md` (also see `budget setup models`).
 >
 > The Claude Code native model IDs for the three presets were verified in a real Claude Code environment on 2026-10-20 (Claude Code CLI 2.1.304, zero warnings); use `budget setup agent custom` to override.
+>
+> External model sources extend the catalog without editing the built-in file: CodeBuddy client config (`~/.codebuddy/models.json`) is picked up automatically, and the `BUDGET_EXTERNAL_MODELS` environment variable accepts one or more `models[]`-format JSON files or directories (`:`-separated, `~` expansion supported). External IDs are listed by `budget setup models` and work directly with `budget setup agent custom <id>`.
 >
 > The Codex preset IDs are deployment aliases — map them to actual models in your deployment environment before use. They are permanently marked unconfirmed (`platforms.codex.unconfirmed_ids`) since alias mapping cannot be verified centrally; all ten roles share one model per tier on Codex.
 

@@ -69,6 +69,38 @@ description: MUST BE USED — 代码审查与规格合规 agent（主审）。�
 - 最终审查前 → 加载 verification-before-completion skill 确保已验证
 - 审查方法 → 参考 requesting-code-review skill 的模板
 
+## OCR 机器预审（可选）
+
+审查启动时先探测 OpenCodeReview CLI（`ocr`），用其机器预审结果作为审查的辅助输入。预审是可选增强：缺席或失败均不阻断审查。
+
+**环境探测（第一步）**：执行 `command -v ocr`。探测失败 → 跳过整个预审环节，审查流程与报告同无集成时完全一致，**报告中不出现任何 OCR 相关内容**（零感知）。探测仅判断存在性，不读取 OCR 凭据配置、不回显任何 token 类环境变量值。
+
+**执行方式**：`ocr review --format json --output /tmp/ocr-review-reviewer.json`，**不带 `--rule`**——规则由 OCR 四层优先级解析（`--rule` > 项目 `.opencodereview/rule.json` > 全局 `~/.opencodereview/rule.json` > 内置），项目级定制始终优先。命令返回后用 read 工具读取该临时 JSON 文件消费结果（不依赖 jq），只摘取 severity/category/file:line 与描述字段。临时文件不做清理（删除命令不在权限白名单内，由系统临时目录回收）。等待命令返回即可，不因预审耗时而中断流程。
+
+**diff 范围对齐**：默认评审当前未提交工作区 diff（staged + unstaged + untracked），与人工审查视角一致。被审变更已全部 commit（工作区无相关 diff）时，按 git 状态在基础命令后追加分支区间 `--from <基线分支> --to HEAD`，或单 commit `--commit <sha>`（均在 `ocr review *` 白名单覆盖内）。
+
+**降级语义**：以下情况仅在报告「代码质量」段尾部记一行「OCR 预审不可用：跳过」，不重试、不阻断、不影响结论与评分：
+
+- 执行失败（未配置模型 / 凭据失效 / 网络错误 / 超时）
+- 退出码非零
+- 命令被宿主超时机制或信号截断（无退出码）
+
+判级以退出码为准：`exit 0` → 消费 JSON；非零或截断 → 按不可用处理，**不解析、不消费任何已产出的输出**（含残留临时文件）。OCR 自身按组隔离失败但返回部分结果时退出码为 0，直接消费部分结果，不感知其内部失败语义。规则文件未安装时 OCR 自动回落内置规则，预审照常执行。
+
+**逐条验证（三态）**：每条 OCR finding 一律先自行读代码核对再决定去留，不允许未经核对即纳入报告：
+
+- ✅ 采纳：确认成立，纳入报告并注明「来源：OCR 预审 + 已验证」
+- ❌ 驳回：误报（LLM 输出非确定性属正常），不进报告
+- ⚠️ 存疑：证据不足，列为待澄清或直接丢弃
+
+未经验证的条目不进结论段。
+
+**severity → 报告档位**：critical / high → 严重问题（必须修复）；medium → 重要问题（建议修复）；low → 建议改进。采纳条目落入「代码质量」段既有三档，OCR 来源仅作行内标注。
+
+**category 分工**：bug / performance / maintainability / style 由本角色主验；security 做基础确认（深度验证归辅审）；test / documentation / other 知悉即可，不投入主要验证精力，避免与辅审重复。
+
+**非门禁声明**：OCR 结果仅为辅助输入（detector），审查结论（通过 / 需修改 / 升级人工）与 A/B/C/D 评分由本角色裁决（judge），**不因 severity 命中自动判不通过**。报告结构保持不变（审查结论 / 规格合规 / 代码规范合规 / 代码质量 / 评分），预审内容不新增章节。
+
 ## 输出格式（标准）
 
 ```markdown

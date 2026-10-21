@@ -27,7 +27,7 @@
 环境变量（setup.sh exec 时导出；直调时自行兜底探测）:
     BUDGET_SETUP_DIR  setup.sh 所在目录
     BUDGET_GLOBAL     "1" 全局模式
-    BUDGET_PLATFORM   显式平台（codebuddy|claudecode|opencode，跳过探测）
+    BUDGET_PLATFORM   显式平台（codebuddy|claudecode|codex|opencode，跳过探测）
     BUDGET_DIR        运行时数据目录覆盖
 """
 
@@ -139,7 +139,7 @@ _SETUP_SCRIPT = _locate_setup_script()
 _NON_INTERACTIVE = False  # main() 入口按参数与 tty 检测设置
 _TOTAL_STEPS = 8
 
-# ─── 平台探测（语义对齐 lib/platform.sh 五分支；纯只读文件系统检查）─────────
+# ─── 平台探测（语义对齐 lib/platform.sh 七分支；纯只读文件系统检查）─────────
 
 _SUITE_AGENTS = (
     'architect', 'coder-lite', 'coder-standard', 'coder-senior', 'reviewer',
@@ -157,6 +157,16 @@ def _has_suite_agents(directory: str) -> bool:
     )
 
 
+def _has_codex_skill(directory: str) -> bool:
+    """判断目录是否为 codex 套件 skill 目录（对齐 platform.sh 签名校验：
+    目录名 budget-workflow + SKILL.md 存在双条件，防同名目录误判）。"""
+    if not os.path.isdir(directory):
+        return False
+    if os.path.basename(os.path.realpath(directory)) != 'budget-workflow':
+        return False
+    return os.path.isfile(os.path.join(directory, 'SKILL.md'))
+
+
 def _walk_up(predicate: Callable[[str], bool], max_levels: int = 10):
     """从 cwd 向上最多 max_levels 层查找满足 predicate 的目录；未命中返回 None。"""
     directory = os.path.realpath(os.getcwd())
@@ -170,9 +180,10 @@ def _walk_up(predicate: Callable[[str], bool], max_levels: int = 10):
 
 
 def _detect_platform() -> dict:
-    """运行时平台探测（对齐 platform.sh 五分支：BUDGET_PLATFORM 显式 >
+    """运行时平台探测（对齐 platform.sh 七分支：BUDGET_PLATFORM 显式 >
     codebuddy 项目级 > codebuddy 全局 > claudecode 项目级 > claudecode
-    全局 > opencode 项目级 > opencode 全局 > unknown）。"""
+    全局 > codex 项目级 > codex 全局 > opencode 项目级 > opencode 全局 >
+    unknown）。"""
     result = {'kind': 'unknown', 'scope': '', 'root': '', 'agents_dir': ''}
     explicit = os.environ.get('BUDGET_PLATFORM', '')
     if explicit == 'codebuddy':
@@ -182,6 +193,11 @@ def _detect_platform() -> dict:
     if explicit == 'claudecode':
         result.update(kind='claudecode', scope='global',
                       agents_dir=os.path.join(_HOME, '.claude', 'agents'))
+        return result
+    if explicit == 'codex':
+        result.update(kind='codex', scope='global',
+                      agents_dir=os.path.join(_HOME, '.codex', 'skills',
+                                              'budget-workflow', 'agents'))
         return result
     if explicit == 'opencode':
         result.update(kind='opencode', scope='global',
@@ -205,6 +221,18 @@ def _detect_platform() -> dict:
     if _has_suite_agents(os.path.join(_HOME, '.claude', 'agents')):
         result.update(kind='claudecode', scope='global',
                       agents_dir=os.path.join(_HOME, '.claude', 'agents'))
+        return result
+    root = _walk_up(lambda d: _has_codex_skill(os.path.join(d, '.codex', 'skills',
+                                                           'budget-workflow')))
+    if root:
+        result.update(kind='codex', scope='project', root=root,
+                      agents_dir=os.path.join(root, '.codex', 'skills',
+                                              'budget-workflow', 'agents'))
+        return result
+    if _has_codex_skill(os.path.join(_HOME, '.codex', 'skills', 'budget-workflow')):
+        result.update(kind='codex', scope='global',
+                      agents_dir=os.path.join(_HOME, '.codex', 'skills',
+                                              'budget-workflow', 'agents'))
         return result
     root = _walk_up(lambda d: _has_suite_agents(os.path.join(d, '.opencode', 'agent')))
     if root:
@@ -431,7 +459,7 @@ def _print_step(step_num: int, title: str) -> None:
 
 
 def step1_welcome() -> None:
-    """欢迎页：banner + 项目简介（多 Agent 省钱工作流、三平台支持）。"""
+    """欢迎页：banner + 项目简介（多 Agent 省钱工作流、四平台支持）。"""
     print(_box_top())
     print(_box_empty())
     print(_box_center(f'{BOLD}BudgetBuddy 快速上手向导{NC}'))
@@ -443,7 +471,7 @@ def step1_welcome() -> None:
     print(f'  {CYAN}·{NC} 多 Agent 省钱工作流 — 10 个专职 Agent（架构 / 分级编码 / 双审 / 测试 / 终裁）协作交付')
     print(f'  {CYAN}·{NC} 模型分级调度 — economic / balanced / quality 三档预设，按角色匹配高性价比模型')
     print(f'  {CYAN}·{NC} 五阶段质量闸门 — 方案设计 → 评审 → 开发 → 终审 → 归档，全程 Review Gate')
-    print(f'  {CYAN}·{NC} 三平台支持 — CodeBuddy / OpenCode / Claude Code 共用一套配置，改一处多平台生效')
+    print(f'  {CYAN}·{NC} 四平台支持 — CodeBuddy / OpenCode / Claude Code / Codex 共用一套配置，改一处多平台生效')
     print()
     print(f'本向导共 {_TOTAL_STEPS} 步，每步均可跳过（直接回车取默认值，Ctrl-C 随时退出）。')
 
@@ -465,7 +493,7 @@ def step2_environment_check() -> None:
     platform = _detect_platform()
     if platform['kind'] == 'unknown':
         print(f'{YELLOW}[!]{NC} 未检测到 BudgetBuddy 安装形态（多级探测均未命中）')
-        print('    可设置 BUDGET_PLATFORM=codebuddy|claudecode|opencode 显式指定，或先运行 budget setup init')
+        print('    可设置 BUDGET_PLATFORM=codebuddy|claudecode|codex|opencode 显式指定，或先运行 budget setup init')
     else:
         root_note = f'（root: {platform["root"]}）' if platform['root'] else ''
         print(f'{CYAN}[i]{NC} 运行平台: {platform["kind"]}:{platform["scope"]}{root_note}')
@@ -631,6 +659,9 @@ def step7_workflow_demo() -> None:
     print(f'  在 {CYAN}CodeBuddy{NC} 主会话输入:  {CYAN}/budget:start <你的需求描述>{NC}')
     print(f'  在 {CYAN}OpenCode{NC} 主会话输入:   {CYAN}/budget-start <你的需求描述>{NC}')
     print(f'  在 {CYAN}Claude Code{NC} 主会话输入: {CYAN}/budget:start <你的需求描述>{NC}')
+    print(f'  在 {CYAN}Codex{NC} 会话中输入:    {CYAN}<自然语言描述需求>{NC}（触发 budget-workflow skill）')
+    print()
+    print(f'  {YELLOW}[!]{NC} Codex 平台前置：需 config.toml [features] multi_agent = true，且模型为部署别名映射（见 budget setup models）。')
     print()
     print('  示例: /budget:start 实现一个用户登录模块，要求支持密码与验证码两种方式')
     print()
@@ -643,7 +674,7 @@ def step7_workflow_demo() -> None:
     print(f'  {CYAN}Phase 5{NC}  归档沉淀   recorder 归档变更并提取经验')
     print()
     print(f'  长期目标模式（Goal Loop）用 {CYAN}/budget:goal{NC} 启动，追加 Phase 6 目标验证循环。')
-    print(f'  运行中随时用 {CYAN}/budget:status{NC} 查看进度（OpenCode: /budget-status；Claude Code 同 CodeBuddy）。')
+    print(f'  运行中随时用 {CYAN}/budget:status{NC} 查看进度（OpenCode: /budget-status；Claude Code 同 CodeBuddy；Codex 用 budget status）。')
     print()
 
 # ─── 步骤 8/8: 完成页 ──────────────────────────────────────────────────────
@@ -658,7 +689,7 @@ def step8_completion() -> None:
     print(_box_bottom(GREEN))
     print()
     print('后续步骤：')
-    print(f'  {GREEN}1.{NC} {CYAN}/budget:start <需求描述>{NC} 开始你的第一次工作流（OpenCode: /budget-start；Claude Code 同 CodeBuddy）')
+    print(f'  {GREEN}1.{NC} {CYAN}/budget:start <需求描述>{NC} 开始你的第一次工作流（OpenCode: /budget-start；Claude Code 同 CodeBuddy；Codex 自然语言触发 skill）')
     print(f'  {GREEN}2.{NC} {CYAN}budget setup help{NC} 查看全部管理命令')
     print(f'  {GREEN}3.{NC} {CYAN}budget status{NC} 查看运行状态与配置概览')
     print(f'  {GREEN}4.{NC} {CYAN}budget setup quickstart{NC} 随时重跑本向导（别名 tour / wizard）')

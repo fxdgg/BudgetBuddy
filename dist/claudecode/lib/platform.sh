@@ -28,29 +28,44 @@ _budget_has_suite_agents() {
     return 1
 }
 
-# 运行时平台探测（design.md §8.3 / add-claudecode-platform D5 五分支）：
+# 判断目录是否为 codex 套件 skill 目录（add-codex-platform D5 签名校验）：
+# 目录名限定 budget-workflow + SKILL.md 存在双条件（防同名目录误判），
+# 对应 claudecode 的 _budget_has_suite_agents 判定思路。
+_budget_has_codex_skill() {
+    local dir="$1"
+    [[ -d "$dir" ]] || return 1
+    [[ "$(basename "$dir")" == "budget-workflow" ]] || return 1
+    [[ -f "$dir/SKILL.md" ]]
+}
+
+# 运行时平台探测（design.md §8.3 / add-codex-platform D5 七分支）：
 #   ① 向上查找 .codebuddy/setup.sh（最多 10 层父目录）→ codebuddy 项目级
 #   ② ~/.codebuddy/setup.sh → codebuddy 全局
 #   ③ 向上查找 .claude/agents/ 含本套件 agent → claudecode 项目级
 #   ④ ~/.claude/agents/ 含本套件 agent → claudecode 全局
-#   ⑤ .opencode/agent/（项目级，优先，向上查找）或 ~/.config/opencode/agent/
+#   ⑤ 向上查找 .codex/skills/budget-workflow/（SKILL.md 套件签名校验）→
+#      codex 项目级
+#   ⑥ ~/.codex/skills/budget-workflow/（同签名校验）→ codex 全局
+#   ⑦ .opencode/agent/（项目级，优先，向上查找）或 ~/.config/opencode/agent/
 #      存在本套件 agent → opencode
-#   同时命中多个形态时按探测序取先（codebuddy > claudecode > opencode）。
-#   五级均未命中 → stderr 报错并列出已检测位置（不静默猜默认），
+#   同时命中多个形态时按探测序取先（codebuddy > claudecode > codex > opencode）。
+#   七级均未命中 → stderr 报错并列出已检测位置（不静默猜默认），
 #   stdout 输出 unknown 并返回 1。
-# BUDGET_PLATFORM 显式指定（codebuddy|claudecode|opencode，非交互/安装器场景）
-# 时跳过探测，视为全局形态；非法值忽略并继续探测。
+# BUDGET_PLATFORM 显式指定（codebuddy|claudecode|codex|opencode，非交互/
+# 安装器场景）时跳过探测，视为全局形态；非法值忽略并继续探测。
 #
 # stdout 输出格式（同时将探测结果写入全局变量，供 agent preset/custom
 # 与 hooks 注入定位落点；命令替换调用时变量副作用不传播，需当前 shell
 # 直接调用）：
 #   codebuddy:project:<path> / codebuddy:global /
 #   claudecode:project / claudecode:global /
+#   codex:project:<path> / codex:global /
 #   opencode:project / opencode:global / unknown
-# 全局变量：BUDGET_PLATFORM_KIND（codebuddy|claudecode|opencode|unknown）、
+# 全局变量：BUDGET_PLATFORM_KIND（codebuddy|claudecode|codex|opencode|unknown）、
 #   BUDGET_PLATFORM_SCOPE（project|global）、BUDGET_PLATFORM_ROOT
 #   （项目根绝对路径，project 形态时非空）、BUDGET_AGENTS_DIR
-#   （claudecode 形态下 hooks 注入由 hooks.sh 按 kind != codebuddy 跳过）。
+#   （codex 形态为 skill 内 agents/ 素材目录；claudecode 形态下 hooks 注入
+#   由 hooks.sh 按 kind != codebuddy 跳过）。
 detect_platform() {
     BUDGET_PLATFORM_KIND="unknown"
     BUDGET_PLATFORM_SCOPE=""
@@ -72,6 +87,13 @@ detect_platform() {
                 BUDGET_PLATFORM_SCOPE="global"
                 BUDGET_AGENTS_DIR="$HOME/.claude/agents"
                 echo "claudecode:global"
+                return 0
+                ;;
+            codex)
+                BUDGET_PLATFORM_KIND="codex"
+                BUDGET_PLATFORM_SCOPE="global"
+                BUDGET_AGENTS_DIR="$HOME/.codex/skills/budget-workflow/agents"
+                echo "codex:global"
                 return 0
                 ;;
             opencode)
@@ -138,7 +160,32 @@ detect_platform() {
         return 0
     fi
 
-    # ⑤ .opencode/agent/（项目级，优先，向上查找）→ opencode 项目级
+    # ⑤ 向上查找 .codex/skills/budget-workflow/（SKILL.md 套件签名校验，
+    #    最多 10 层父目录）→ codex 项目级
+    dir="$(pwd -P)"
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        if _budget_has_codex_skill "$dir/.codex/skills/budget-workflow"; then
+            BUDGET_PLATFORM_KIND="codex"
+            BUDGET_PLATFORM_SCOPE="project"
+            BUDGET_PLATFORM_ROOT="$dir"
+            BUDGET_AGENTS_DIR="$dir/.codex/skills/budget-workflow/agents"
+            echo "codex:project:$dir"
+            return 0
+        fi
+        [[ "$dir" == "/" ]] && break
+        dir="$(dirname "$dir")"
+    done
+
+    # ⑥ ~/.codex/skills/budget-workflow/（同签名校验）→ codex 全局
+    if _budget_has_codex_skill "$HOME/.codex/skills/budget-workflow"; then
+        BUDGET_PLATFORM_KIND="codex"
+        BUDGET_PLATFORM_SCOPE="global"
+        BUDGET_AGENTS_DIR="$HOME/.codex/skills/budget-workflow/agents"
+        echo "codex:global"
+        return 0
+    fi
+
+    # ⑦ .opencode/agent/（项目级，优先，向上查找）→ opencode 项目级
     dir="$(pwd -P)"
     for i in 1 2 3 4 5 6 7 8 9 10; do
         if _budget_has_suite_agents "$dir/.opencode/agent"; then
@@ -162,16 +209,18 @@ detect_platform() {
         return 0
     fi
 
-    # 五级均未命中：显式报错并列出已检测位置（不静默猜默认）
-    echo "[✗] 未检测到 BudgetBuddy 安装形态（五级探测均未命中）" >&2
+    # 七级均未命中：显式报错并列出已检测位置（不静默猜默认）
+    echo "[✗] 未检测到 BudgetBuddy 安装形态（七级探测均未命中）" >&2
     echo "已检测位置：" >&2
     echo "  - $(pwd -P) 及其向上至多 10 层父目录下的 .codebuddy/setup.sh" >&2
     echo "  - $HOME/.codebuddy/setup.sh" >&2
     echo "  - $(pwd -P) 及其向上至多 10 层父目录下的 .claude/agents/（本套件 agent）" >&2
     echo "  - $HOME/.claude/agents/（本套件 agent）" >&2
+    echo "  - $(pwd -P) 及其向上至多 10 层父目录下的 .codex/skills/budget-workflow/（SKILL.md 套件签名）" >&2
+    echo "  - $HOME/.codex/skills/budget-workflow/（SKILL.md 套件签名）" >&2
     echo "  - $(pwd -P) 及其向上至多 10 层父目录下的 .opencode/agent/（本套件 agent）" >&2
     echo "  - $HOME/.config/opencode/agent/（本套件 agent）" >&2
-    echo "提示：可设置 BUDGET_PLATFORM=codebuddy|claudecode|opencode 显式指定平台" >&2
+    echo "提示：可设置 BUDGET_PLATFORM=codebuddy|claudecode|codex|opencode 显式指定平台" >&2
     echo "unknown"
     return 1
 }

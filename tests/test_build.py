@@ -1958,5 +1958,346 @@ class ManifestUnitTests(unittest.TestCase):
         self.assertFalse(new_dir.exists())
 
 
+# ---------------------------------------------------------------------------
+# codex 平台构建 + rules_index kind（add-codex-platform D1/D2/D3，任务 4.1）
+# ---------------------------------------------------------------------------
+
+PLATFORMS_QUAD = PLATFORMS_TRIPLE + ('codex',)
+
+
+def make_models_json_quad():
+    """四平台（含 codex）测试 budget-models.json 数据。
+
+    在 make_models_json 基础上追加 codex 平台段：三档预设每角色统一模型
+    （gpt-luna/gpt-terra/gpt-sol，目录新增 gpt 厂商组承载、platform 仅
+    codex，provider_map 覆盖该组以满足全覆盖校验）。
+    """
+    data = make_models_json()
+    roles = [row[1] for row in AGENT_TABLE]
+    tier_ids = {'economic': 'gpt-luna', 'balanced': 'gpt-terra', 'quality': 'gpt-sol'}
+    data['models']['paid']['gpt'] = [
+        {'id': tier_ids[tier], 'tier': 'mid', 'cost': 'x1.00',
+         'tags': ['general'], 'platform': ['codex']}
+        for tier in ('economic', 'balanced', 'quality')]
+    data['provider_map']['gpt'] = 'opencode'
+    data['platforms']['codex'] = {
+        'presets': {tier: {role: tier_ids[tier] for role in roles}
+                    for tier in ('economic', 'balanced', 'quality')}}
+    return data
+
+
+def write_full_models_quad(root):
+    """写入四平台 budget-models.json（make_models_json_quad 数据）。"""
+    target = root / 'core' / 'models' / 'budget-models.json'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(make_models_json_quad(), indent=2, sort_keys=True, ensure_ascii=False) + '\n',
+        encoding='utf-8')
+
+
+class RulesIndexDslTests(unittest.TestCase):
+    """rules_index kind DSL 校验（D2）与真实 codex.yaml 解析。"""
+
+    @staticmethod
+    def load_dsl(name):
+        return build.parse_yaml((PLATFORM_YAML_DIR / name).read_text(encoding='utf-8'))
+
+    def test_real_codex_yaml_parses(self):
+        """真实 codex.yaml 全字段正确加载（rules_index + copy_dest +
+        emit 仅 name/description + TASK_TOOL=spawn_agent）。"""
+        data = self.load_dsl('codex.yaml')
+        self.assertEqual(data['platform'], 'codex')
+        self.assertEqual(data['output'], 'dist/codex')
+        self.assertEqual(data['routing']['agent'], 'skills/budget-workflow/agents/{name}.md')
+        self.assertEqual(
+            data['routing']['command'], 'skills/budget-workflow/commands/{group}-{name}.md')
+        self.assertEqual(data['routing']['skill'], 'skills/{skill}/')
+        self.assertEqual(data['routing']['rule'], 'AGENTS.fragment.md')
+        self.assertEqual(data['routing']['hook'], '')
+        self.assertEqual(
+            data['routing']['docs']['codex-runtime.md'],
+            'skills/budget-workflow/codex-runtime.md')
+        self.assertIsNone(data['routing']['docs']['opencode-setup-notes.md'])
+        emit = data['agent_frontmatter']['emit']
+        self.assertEqual(emit, {'name': '{name}', 'description': '{description}'})
+        self.assertEqual(data['command_frontmatter']['emit'], ['description'])
+        self.assertEqual(data['body_variables']['TASK_TOOL'], 'spawn_agent')
+        self.assertEqual(data['extra_outputs'], [{
+            'kind': 'rules_index',
+            'source': 'rules/**',
+            'dest': 'AGENTS.fragment.md',
+            'copy_dest': 'skills/budget-workflow/rules',
+            'markers': ['<!-- BudgetBuddy:begin -->', '<!-- BudgetBuddy:end -->'],
+        }])
+
+    def test_real_codex_yaml_valid(self):
+        """真实 codex.yaml 通过 DSL schema 校验（双清单一致的前提之一）。"""
+        dsl = self.load_dsl('codex.yaml')
+        self.assertIs(build.validate_dsl(dsl, 'codex.yaml'), dsl)
+
+    def test_real_yamls_valid_quad(self):
+        """真实四份 yaml（含 codex）均通过 DSL schema 校验。"""
+        for name in ('codebuddy.yaml', 'opencode.yaml', 'claudecode.yaml', 'codex.yaml'):
+            dsl = self.load_dsl(name)
+            self.assertIs(build.validate_dsl(dsl, name), dsl)
+
+    def test_unknown_kind_error_lists_legal_kinds(self):
+        """未知 kind：BuildError 列出全部合法 kind（agents_fragment/rules_index）。"""
+        dsl = self.load_dsl('opencode.yaml')
+        dsl['extra_outputs'][0]['kind'] = 'ghost_kind'
+        with self.assertRaises(build.BuildError) as ctx:
+            build.validate_dsl(dsl, 'test.yaml')
+        self.assertIn('kind（ghost_kind）不合法', str(ctx.exception))
+        self.assertIn('agents_fragment', str(ctx.exception))
+        self.assertIn('rules_index', str(ctx.exception))
+
+    def test_rules_index_dest_must_match_routing_rule(self):
+        """rules_index dest 与 routing.rule 不一致 → BuildError（同 agents_fragment 先例）。"""
+        dsl = self.load_dsl('codex.yaml')
+        dsl['extra_outputs'][0]['dest'] = 'OTHER.fragment.md'
+        with self.assertRaises(build.BuildError) as ctx:
+            build.validate_dsl(dsl, 'test.yaml')
+        self.assertIn('routing.rule', str(ctx.exception))
+        self.assertIn('不一致', str(ctx.exception))
+
+    def test_copy_dest_rejected_on_agents_fragment(self):
+        """copy_dest 仅 rules_index 支持：agents_fragment 携带 → BuildError。"""
+        dsl = self.load_dsl('opencode.yaml')
+        dsl['extra_outputs'][0]['copy_dest'] = 'rules-copy'
+        with self.assertRaises(build.BuildError) as ctx:
+            build.validate_dsl(dsl, 'test.yaml')
+        self.assertIn('copy_dest 仅 rules_index kind 支持', str(ctx.exception))
+
+    def test_copy_dest_escape_rejected(self):
+        """rules_index copy_dest 含 .. → BuildError（防逃逸）。"""
+        dsl = self.load_dsl('codex.yaml')
+        dsl['extra_outputs'][0]['copy_dest'] = 'skills/../rules'
+        with self.assertRaises(build.BuildError) as ctx:
+            build.validate_dsl(dsl, 'test.yaml')
+        self.assertIn('copy_dest', str(ctx.exception))
+        self.assertIn('..', str(ctx.exception))
+
+    def test_copy_dest_null_passes(self):
+        """copy_dest 省略/null 合法（仅索引无副本形态）。"""
+        dsl = self.load_dsl('codex.yaml')
+        del dsl['extra_outputs'][0]['copy_dest']
+        build.validate_dsl(dsl, 'test.yaml')
+        dsl['extra_outputs'][0]['copy_dest'] = None
+        build.validate_dsl(dsl, 'test.yaml')
+
+
+class CodexPlatformBuildTests(unittest.TestCase):
+    """codex 平台构建产物 + rules_index 双输出（add-codex-platform 任务 4.1）。
+
+    四平台数据就位的临时仓库（四 yaml + 四平台 models.json + 全量 agents），
+    覆盖：rules_index 双输出（dest 轻量索引 + copy_dest 全文副本）、轻量断言
+    （< 1KiB、markers、规则清单行）、未知 kind 构建报错、`_build_rules` 抑制
+    回归（rules_index 存在时规则全文不逐文件覆盖 fragment dest，三平台行为
+    不变）、codex DSL 产物形态（agent 素材 frontmatter 仅 name/description、
+    {{TASK_TOOL}}→spawn_agent、commands 并入 skill、codex-runtime.md 经 docs
+    分发进 skill）。
+    """
+
+    RULE_STEMS = tuple(f'budget-rule-{i:02d}' for i in range(1, 7))
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.core = self.root / 'core'
+        for name in ('codebuddy.yaml', 'opencode.yaml', 'claudecode.yaml', 'codex.yaml'):
+            dest = self.core / 'platform' / name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(PLATFORM_YAML_DIR / name, dest)
+        for category in ('agents', 'skills', 'commands', 'rules',
+                         'models', 'personas', 'lib', 'docs', 'hooks'):
+            (self.core / category).mkdir(parents=True, exist_ok=True)
+        write_agents(self.root)
+        write_full_models_quad(self.root)
+        # 规则（带 frontmatter description，索引清单行断言基准）；
+        # 首条正文含 {{TASK_TOOL}} 以验证 copy_dest 副本变量替换。
+        for i, stem in enumerate(self.RULE_STEMS):
+            body = (f'{stem} 全文正文（不得进入索引）。使用 {{{{TASK_TOOL}}}} 派发。\n'
+                    if i == 0 else f'{stem} 全文正文（不得进入索引）。\n')
+            (self.core / 'rules' / f'{stem}.md').write_text(
+                f'---\ndescription: {stem} 规则一句话描述。\n---\n\n{body}',
+                encoding='utf-8')
+        # skill / commands / personas / docs。
+        self.write_file('core/skills/budget-workflow/SKILL.md',
+                        '# 工作流\n\n调用 {{TASK_TOOL}} 与 {{SKILL_NS}}\n')
+        self.write_file('core/commands/budget/start.md',
+                        '---\nname: "Budget: Start"\ndescription: 启动工作流。\n'
+                        'argument-hint: "<需求描述>"\n---\n使用 {{TASK_TOOL}} 启动。\n')
+        self.write_file('core/commands/opsx/apply.md',
+                        '---\nname: "Opsx: Apply"\ndescription: 应用变更。\n---\n正文。\n')
+        (self.core / 'personas' / 'personas.json').write_text(
+            json.dumps({'_meta': {}, 'themes': {}}), encoding='utf-8')
+        self.write_file('core/docs/codex-runtime.md', '# Codex 派工契约\n')
+        self.write_file('core/docs/PERSONAS.md', '# Personas 说明\n')
+
+    def write_file(self, relpath, text):
+        target = self.root / relpath
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding='utf-8')
+
+    def build_all(self):
+        proc = run_build(self.root)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc
+
+    # ----- rules_index 双输出（D2/D3 单次遍历） -----
+
+    def test_rules_index_dual_output(self):
+        """双输出：dest 轻量索引 + copy_dest 全文副本目录同次构建产出。"""
+        self.build_all()
+        cx = self.root / 'dist' / 'codex'
+        fragment = cx / 'AGENTS.fragment.md'
+        self.assertTrue(fragment.is_file())
+        for stem in self.RULE_STEMS:
+            copy = cx / 'skills' / 'budget-workflow' / 'rules' / f'{stem}.md'
+            self.assertTrue(copy.is_file(), stem)
+            text = copy.read_text(encoding='utf-8')
+            self.assertIn(f'{stem} 全文正文', text, stem)
+        # 副本变量替换：首条规则的 {{TASK_TOOL}} → spawn_agent，零残留。
+        first_copy = (cx / 'skills' / 'budget-workflow' / 'rules'
+                      / f'{self.RULE_STEMS[0]}.md').read_text(encoding='utf-8')
+        self.assertIn('使用 spawn_agent 派发。', first_copy)
+        self.assertNotIn('{{TASK_TOOL}}', first_copy)
+
+    def test_rules_index_lightweight(self):
+        """轻量断言：fragment < 1KiB、外层 markers、标题 + 指引 + 规则清单行
+        （文件名 + description 一句话）；规则全文不进索引。"""
+        self.build_all()
+        fragment = self.root / 'dist' / 'codex' / 'AGENTS.fragment.md'
+        raw = fragment.read_bytes()
+        self.assertLess(len(raw), 1024)
+        text = raw.decode('utf-8')
+        self.assertTrue(text.startswith('<!-- BudgetBuddy:begin -->'))
+        self.assertIn('<!-- BudgetBuddy:end -->', text)
+        self.assertIn('# BudgetBuddy 规则索引', text)
+        self.assertIn('32KiB 截断上限', text)
+        self.assertIn('全文目录 skills/budget-workflow/rules/', text)
+        for stem in self.RULE_STEMS:
+            # 描述先按句读截断（'。' 前），再受 36 字节上限约束——此处两者一致。
+            self.assertIn(f'- {stem}.md — {stem} 规则一句话描述', text, stem)
+            self.assertNotIn(f'{stem} 全文正文', text, stem)
+
+    def test_rules_index_unknown_kind_build_error(self):
+        """管线级：kind 拼错 → 构建失败，报错含 kind 与合法枚举。"""
+        yaml_path = self.core / 'platform' / 'codex.yaml'
+        broken = yaml_path.read_text(encoding='utf-8').replace(
+            'kind: rules_index', 'kind: ghost_kind')
+        yaml_path.write_text(broken, encoding='utf-8')
+        proc = run_build(self.root)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn('不合法', proc.stderr)
+        self.assertIn('ghost_kind', proc.stderr)
+        self.assertIn('agents_fragment', proc.stderr)
+        self.assertIn('rules_index', proc.stderr)
+
+    def test_build_rules_suppressed_by_rules_index(self):
+        """抑制回归：rules_index 存在时 12→6 条规则不逐文件落位覆盖
+        AGENTS.fragment.md（fragment 保持索引形态）；三平台既有行为不变
+        （codebuddy 逐文件 .mdc、opencode/claudecode fragment 全文合并）。"""
+        self.build_all()
+        cx_fragment = (self.root / 'dist' / 'codex' / 'AGENTS.fragment.md').read_text(
+            encoding='utf-8')
+        self.assertIn('# BudgetBuddy 规则索引', cx_fragment)
+        self.assertNotIn('全文正文', cx_fragment)
+        # codex 无规则逐文件产物（fragment dest 即 routing.rule 唯一落点）。
+        cx = self.root / 'dist' / 'codex'
+        self.assertFalse((cx / 'AGENTS.fragment.md.rules').exists())
+        # codebuddy：规则仍逐文件落位。
+        self.assertTrue(
+            (self.root / 'dist' / 'codebuddy' / 'rules' / f'{self.RULE_STEMS[0]}.mdc').is_file())
+        # opencode：agents_fragment 全文合并不受影响。
+        oc_fragment = (self.root / 'dist' / 'opencode' / 'AGENTS.fragment.md').read_text(
+            encoding='utf-8')
+        self.assertIn('全文正文', oc_fragment)
+        # claudecode：CLAUDE.fragment.md 全文合并不受影响。
+        cc_fragment = (self.root / 'dist' / 'claudecode' / 'CLAUDE.fragment.md').read_text(
+            encoding='utf-8')
+        self.assertIn('全文正文', cc_fragment)
+
+    # ----- codex DSL 产物形态（D1） -----
+
+    def test_codex_agent_frontmatter_metadata_only(self):
+        """agent 素材 frontmatter 仅 name/description（无 model 烘焙/权限键），
+        落位 skills/budget-workflow/agents/{name}.md。"""
+        self.build_all()
+        for row in AGENT_TABLE:
+            path = self.root / 'dist' / 'codex' / 'skills' / 'budget-workflow' / (
+                f'agents/{row[0]}.md')
+            self.assertTrue(path.is_file(), row[0])
+            text = path.read_text(encoding='utf-8')
+            self.assertIn(f'name: {row[0]}\n', text, row[0])
+            self.assertIn(f'description: {row[0]} 角色示例', text, row[0])
+            for dropped in ('model:', 'model_role', 'tools:', 'permissions',
+                            'max_turns', 'maxTurns', 'permissionMode'):
+                self.assertNotIn(dropped, text, f'{row[0]} 残留 {dropped}')
+
+    def test_codex_task_tool_replaced_with_spawn_agent(self):
+        """{{TASK_TOOL}} → spawn_agent 替换零残留（skill/命令正文）。"""
+        self.build_all()
+        cx = self.root / 'dist' / 'codex'
+        skill_text = (cx / 'skills' / 'budget-workflow' / 'SKILL.md').read_text(
+            encoding='utf-8')
+        self.assertIn('调用 spawn_agent 与', skill_text)
+        self.assertNotIn('{{TASK_TOOL}}', skill_text)
+        cmd_text = (cx / 'skills' / 'budget-workflow' / 'commands'
+                    / 'budget-start.md').read_text(encoding='utf-8')
+        self.assertIn('使用 spawn_agent 启动。', cmd_text)
+        self.assertNotIn('{{TASK_TOOL}}', cmd_text)
+
+    def test_codex_commands_merged_into_skill(self):
+        """命令并入 skill 参考文档：skills/budget-workflow/commands/{group}-{name}.md，
+        frontmatter 仅 description（无 name/argument-hint）。"""
+        self.build_all()
+        cx_cmds = self.root / 'dist' / 'codex' / 'skills' / 'budget-workflow' / 'commands'
+        start = cx_cmds / 'budget-start.md'
+        self.assertTrue(start.is_file())
+        text = start.read_text(encoding='utf-8')
+        self.assertIn('description: 启动工作流。\n', text)
+        self.assertNotIn('name:', text)
+        self.assertNotIn('argument-hint', text)
+        self.assertTrue((cx_cmds / 'opsx-apply.md').is_file())
+
+    def test_codex_runtime_doc_in_skill_only(self):
+        """codex-runtime.md 经 docs 分发进 skill；其余平台 docs 声明 null 不产出。"""
+        self.build_all()
+        self.assertTrue((self.root / 'dist' / 'codex' / 'skills' / 'budget-workflow' / (
+            'codex-runtime.md')).is_file())
+        for platform, base in (('codebuddy', 'docs'), ('opencode', 'docs'),
+                               ('claudecode', 'docs')):
+            self.assertFalse(
+                (self.root / 'dist' / platform / base / 'codex-runtime.md').exists(),
+                platform)
+
+    def test_codex_hooks_not_distributed(self):
+        """routing.hook 空串：codex 产物树不含 hooks（hooks 机制实验态不分发）。"""
+        self.build_all()
+        self.assertEqual(
+            list((self.root / 'dist' / 'codex').rglob('hooks')), [])
+
+    def test_codex_manifest_covers_all_products(self):
+        """manifest 覆盖 codex 产物全集（含 AGENTS.fragment.md 与副本目录）。"""
+        self.build_all()
+        dist_dir = self.root / 'dist' / 'codex'
+        manifest = json.loads((dist_dir / '.manifest.json').read_text(encoding='utf-8'))
+        listed = set(manifest['files'])
+        on_disk = {p.relative_to(dist_dir).as_posix()
+                   for p in dist_dir.rglob('*') if p.is_file()} - {'.manifest.json'}
+        self.assertEqual(listed, on_disk)
+        self.assertIn('AGENTS.fragment.md', listed)
+        self.assertIn('skills/budget-workflow/codex-runtime.md', listed)
+
+    def test_codex_repeated_build_stable(self):
+        """四平台连续两次构建产物树逐字节一致（codex 加入后幂等不回归）。"""
+        self.build_all()
+        first = snapshot_tree(self.root / 'dist')
+        self.build_all()
+        self.assertEqual(first, snapshot_tree(self.root / 'dist'))
+
+
 if __name__ == '__main__':
     unittest.main()

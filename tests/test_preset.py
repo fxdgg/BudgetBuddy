@@ -795,6 +795,106 @@ class AgentCommandClaudecodeTests(SandboxTestCase):
                               'agent %s 仍残留 model 字段' % agent)
 
 
+class AgentCommandCodexTests(SandboxTestCase):
+    """codex 形态降级（add-codex-platform D5/D7，任务 4.1）。
+
+    agent 素材文档无 model 烘焙：preset/custom/inherit 均不修改任何文件，
+    仅打印提示并 exit 0；show 渲染三档映射表；未知模式仍报错。
+    """
+
+    CODEX_AGENT_TMPL = '''---
+name: {name}
+description: MUST BE USED — {name} 测试素材。
+---
+
+{name} 的正文内容（无 model 字段，降级不得新增）。
+'''
+
+    def setUp(self):
+        super().setUp()
+        _copy_management_plane(self.home / '.budgetbuddy')
+        self.agents = self.work / '.codex' / 'skills' / 'budget-workflow' / 'agents'
+        self.agents.mkdir(parents=True)
+        for name in LOCKED_AGENTS:
+            (self.agents / (name + '.md')).write_text(
+                self.CODEX_AGENT_TMPL.format(name=name), encoding='utf-8')
+        (self.agents.parent / 'SKILL.md').write_text(
+            '---\nname: budget-workflow\ndescription: 测试。\n---\n正文\n',
+            encoding='utf-8')
+        self.setup_sh = self.home / '.budgetbuddy' / 'setup.sh'
+
+    def _run(self, args):
+        script = 'bash "%s" agent %s' % (self.setup_sh, args)
+        return run_bash(script, self.work, self.home)
+
+    def _snapshot(self):
+        return {path.name: path.read_bytes() for path in sorted(self.agents.glob('*.md'))}
+
+    def test_preset_downgraded_no_file_change(self):
+        """preset：exit 0 + 降级提示，agent 素材逐字节不变。"""
+        before = self._snapshot()
+        proc = self._run('preset economic')
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn('codex 平台模型档位由 Leader spawn 时按 budget-models.json 查询',
+                      proc.stdout)
+        self.assertIn('budget setup show', proc.stdout)
+        self.assertEqual(self._snapshot(), before)
+
+    def test_custom_downgraded_no_file_change(self):
+        """custom：exit 0 + 降级提示，不解析模型、不写文件。"""
+        before = self._snapshot()
+        proc = self._run('custom glm-5.2')
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn('codex 平台模型档位由 Leader spawn 时按 budget-models.json 查询',
+                      proc.stdout)
+        self.assertEqual(self._snapshot(), before)
+
+    def test_inherit_downgraded_no_file_change(self):
+        """inherit：exit 0 + 降级提示，无文件修改。"""
+        before = self._snapshot()
+        proc = self._run('inherit')
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn('codex 平台模型档位由 Leader spawn 时按 budget-models.json 查询',
+                      proc.stdout)
+        self.assertEqual(self._snapshot(), before)
+
+    def test_no_mode_prints_platform_info(self):
+        """无模式：打印 codex 形态与素材目录定位。"""
+        proc = self._run('')
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn('当前平台: codex:project', proc.stdout)
+        self.assertIn('无 agent frontmatter 模型烘焙', proc.stdout)
+
+    def test_unknown_mode_still_errors(self):
+        """未知模式不降级：报错 rc 1（非档位类命令）。"""
+        proc = self._run('bogus')
+        self.assertEqual(proc.returncode, 1)
+        combined = proc.stdout + proc.stderr
+        self.assertIn('未知模式: bogus', combined)
+
+    def test_show_renders_three_tier_table(self):
+        """show：codex 形态渲染三档映射表（数据源 platforms.codex.presets）+
+        spawn 查表指引与逃生门说明。"""
+        proc = run_bash('bash "%s" show' % self.setup_sh, self.work, self.home)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn('Codex 模型档位映射', proc.stdout)
+        presets = MODELS_DATA['platforms']['codex']['presets']
+        for tier in ('economic', 'balanced', 'quality'):
+            self.assertIn(tier, proc.stdout, tier)
+            model = next(iter(presets[tier].values()))
+            self.assertIn(model, proc.stdout, tier)
+        self.assertIn('spawn_agent', proc.stdout)
+        self.assertIn('逃生门', proc.stdout)
+
+    def test_show_missing_models_file_degrades(self):
+        """show：budget-models.json 缺失 → 警告行降级不崩溃（rc 0）。"""
+        models = self.home / '.budgetbuddy' / 'budget-models.json'
+        models.unlink()
+        proc = run_bash('bash "%s" show' % self.setup_sh, self.work, self.home)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn('未找到 budget-models.json', proc.stdout)
+
+
 class DiffQueryFunctionsTests(SandboxTestCase):
     """do_diff 查询函数契约（budget_get_current_models / budget_preset_table）。"""
 

@@ -176,14 +176,14 @@ class NonInteractiveTests(unittest.TestCase):
         self.assertEqual(list(self.project.rglob('*')), [])
 
     def test_step_output_assertions(self):
-        """各步骤关键输出：欢迎 banner、三平台、三档预设、五阶段、完成指引。"""
+        """各步骤关键输出：欢迎 banner、四平台、三档预设、五阶段、完成指引。"""
         result = run_quickstart(['--non-interactive'], self.project, self.home)
         self.assertEqual(result.returncode, 0)
         output = result.stdout
         # 步骤 1: 欢迎与简介
         self.assertIn('BudgetBuddy 快速上手向导', output)
         self.assertIn('多 Agent 省钱研发工作流套件', output)
-        self.assertIn('三平台支持 — CodeBuddy / OpenCode / Claude Code', output)
+        self.assertIn('四平台支持 — CodeBuddy / OpenCode / Claude Code / Codex', output)
         # 步骤 2: 环境检查（干净环境 → unknown 提示 + 依赖检查）
         self.assertIn('未检测到 BudgetBuddy 安装形态', output)
         self.assertIn('依赖检查：', output)

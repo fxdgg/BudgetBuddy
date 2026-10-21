@@ -1344,6 +1344,62 @@ def check_p0_consistency(core_dir: Path) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# ocr-rule.json 结构校验（design D7 结构层自动化校验）
+# ---------------------------------------------------------------------------
+
+def validate_ocr_rule(core_dir: Path) -> None:
+    """校验 core/lib/ocr-rule.json 结构（design D7）：JSON 可解析、全部
+    merge_system_rule: true、source 值集合与语言规范文件主名集合双向一一对应。
+
+    期望集合 = 枚举 core/rules/budget-*-style.md 文件主名后显式排除
+    budget-trpc-style（glob 枚举而非硬编码七元组，后续新增语言规范文件时
+    校验自动跟进）。违规抛 BuildError（阻塞构建）。
+    """
+    rule_path = core_dir / 'lib' / 'ocr-rule.json'
+    rel = 'core/lib/ocr-rule.json'
+    if not rule_path.is_file():
+        raise BuildError(f'{rel} 缺失：ocr-rule.json 规则文件不存在')
+    text = _read_text(rule_path, rel)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise BuildError(f'{rel} 不是合法 JSON: {exc}') from exc
+    if not isinstance(data, dict):
+        raise BuildError(f'{rel} 顶层必须是对象')
+    rules = data.get('rules')
+    if not isinstance(rules, list):
+        raise BuildError(f'{rel} 缺少 rules 数组（顶层键 rules 必须是列表）')
+    if not rules:
+        raise BuildError(f'{rel}: rules 不能为空')
+    sources: set[str] = set()
+    for i, entry in enumerate(rules):
+        label = f'{rel}: rules[{i}]'
+        if not isinstance(entry, dict):
+            raise BuildError(f'{label} 必须是对象')
+        for field in ('path', 'rule', 'source'):
+            value = entry.get(field)
+            if not isinstance(value, str) or not value:
+                raise BuildError(f'{label} 缺少非空字符串字段 {field}')
+        if entry.get('merge_system_rule') is not True:
+            raise BuildError(f'{label} 的 merge_system_rule 必须为 true')
+        source = entry['source']
+        if source in sources:
+            raise BuildError(f'{label} 的 source（{source}）重复')
+        sources.add(source)
+    expected = {path.stem for path in (core_dir / 'rules').glob('budget-*-style.md')}
+    expected.discard('budget-trpc-style')
+    if not expected:
+        raise BuildError(
+            'core/rules/ 下无 budget-*-style.md 语言规范文件，无法建立 source 期望集合')
+    missing = sorted(expected - sources)
+    extra = sorted(sources - expected)
+    if missing or extra:
+        raise BuildError(
+            f'{rel}: source 与语言规范文件主名双向不一致'
+            f'（缺失 {missing} / 多余 {extra}）')
+
+
+# ---------------------------------------------------------------------------
 # 文件读写与构建流程（design.md §4）
 # ---------------------------------------------------------------------------
 
@@ -1926,7 +1982,9 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         '--platform', default=None, metavar='<platform>',
         help='仅构建指定平台（可用平台由 core/platform/*.yaml 枚举，默认构建全部平台）')
-    parser.add_argument('--check', action='store_true', help='构建成功后运行品牌门禁 scan-brand.py')
+    parser.add_argument(
+        '--check', action='store_true',
+        help='构建成功后校验 ocr-rule.json 结构并运行品牌门禁 scan-brand.py')
     parser.add_argument('--strict', action='store_true', help='将 P0 一致性告警升级为失败（CI 用）')
     parser.add_argument('--root', default=None, help='仓库根目录（默认：本脚本上两级）')
     return parser.parse_args(argv)
@@ -1965,6 +2023,7 @@ def main(argv: list[str] | None = None) -> int:
         if run_brand_scan(root) != 0:
             print('[build] 品牌门禁未通过（--check）', file=sys.stderr)
             return 1
+        validate_ocr_rule(root / 'core')
     return 0
 
 

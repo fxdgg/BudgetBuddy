@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-21
+
+### Added
+
+- **Codex platform support (fourth platform)** — built from the same neutral source: `core/platform/codex.yaml` mapping DSL emitting `dist/codex/` as a **skill-directory form** (`skills/budget-workflow/` with SKILL.md + reference docs + agents/commands material + full rules + `codex-runtime.md` dispatch contract; no Codex sub-agent TOML definitions — agent files become skill material emitting only name/description metadata, model resolved by the Leader at spawn time); new `rules_index` `extra_outputs` kind generates the lightweight `AGENTS.fragment.md` rules index (markers + on-demand reading guidance + rule list, well under 1 KiB to stay below the Codex AGENTS.md 32 KiB doc limit — full rule text lands inside the skill and is read on demand); `install_codex` in `install.sh` lands the skill directory under `.codex/skills/` (project) or `~/.codex/skills/` (global), idempotently merges the AGENTS.md lightweight block (existing OpenCode full-form block triggers a co-install warning), and idempotently injects `[features] multi_agent = true` into `config.toml` (backup + atomic write, `[features]` segment only, user config untouched; uninstall removes the key and prunes the empty segment); runtime management plane codex branches — `platform.sh` detection (project `.codex/skills/budget-workflow/` → global, `BUDGET_PLATFORM=codex`), `agent preset/custom/inherit` degrade to guidance (no frontmatter model to rewrite; tier resolved by the Leader at spawn time from `budget-models.json`), `show` prints the three-tier table, notify/quickstart/models/uninstall/validate codex-aware; `budget-models.json` `platforms.codex` three tiers economic→`gpt-5.6-luna` / balanced→`gpt-5.6-terra` / quality→`gpt-5.6-sol` (deployment aliases — map them in your deployment environment; `unconfirmed_ids` permanently marks the three aliases since they cannot be verified centrally, the alias-class pre-release clearing discipline explicitly does not apply); hooks are not distributed (Codex hooks are experimental — `budget notify` CLI remains available); slash commands degrade to natural-language skill triggers on Codex; bilingual README / architecture docs updated to the four-platform scope
+
 ## [0.3.0] - 2026-10-20
 
 ### Added

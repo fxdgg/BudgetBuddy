@@ -394,7 +394,7 @@ class DetectPlatformFailureTests(SandboxTestCase):
         self.assertIn('未检测到', proc.stderr)
         self.assertIn('已检测位置', proc.stderr)
         self.assertIn('.codebuddy/setup.sh', proc.stderr)
-        self.assertIn('.opencode/agent/', proc.stderr)
+        self.assertIn('.codex/skills/budget-workflow/', proc.stderr)
         self.assertIn('.config/opencode/agent', proc.stderr)
 
     def test_failure_clears_vars(self):
@@ -428,12 +428,140 @@ class DetectPlatformEnvOverrideTests(SandboxTestCase):
         self.assertIn('非法', proc.stderr)
         self.assertEqual(proc.stdout.strip(), 'unknown')
 
+    def test_budget_platform_codex(self):
+        """BUDGET_PLATFORM=codex 显式指定（add-codex-platform D5 显式分支）。"""
+        proc = detect(self.work, self.home, env_extra={'BUDGET_PLATFORM': 'codex'})
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), 'codex:global')
+
     def test_budget_platform_overrides_file_detection(self):
         (self.tmp / '.codebuddy').mkdir()
         (self.tmp / '.codebuddy' / 'setup.sh').write_text('#!/bin/bash\n')
         proc = detect(self.work, self.home, env_extra={'BUDGET_PLATFORM': 'opencode'})
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout.strip(), 'opencode:global')
+
+
+class DetectPlatformCodexTests(SandboxTestCase):
+    """分支⑤⑥：codex 项目级（向上查找 .codex/skills/budget-workflow/）与全局
+    （add-codex-platform D5：目录名 + SKILL.md 双条件签名）。"""
+
+    @staticmethod
+    def make_codex_skill(base):
+        """构造 .codex/skills/budget-workflow/SKILL.md 套件签名。"""
+        skill_dir = base / '.codex' / 'skills' / 'budget-workflow'
+        skill_dir.mkdir(parents=True)
+        (skill_dir / 'SKILL.md').write_text('---\nname: budget-workflow\n---\n',
+                                            encoding='utf-8')
+        return skill_dir
+
+    def test_project_level(self):
+        self.make_codex_skill(self.tmp)
+        sub = self.tmp / 'sub'
+        sub.mkdir()
+        proc = detect(sub, self.home)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(),
+                         'codex:project:%s' % self.resolved(self.tmp))
+
+    def test_project_level_upward_from_deep(self):
+        self.make_codex_skill(self.tmp)
+        deep = make_deep_dir(self.tmp, 3)
+        proc = detect(deep, self.home)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(),
+                         'codex:project:%s' % self.resolved(self.tmp))
+
+    def test_global_level(self):
+        self.make_codex_skill(self.home)
+        proc = detect(self.work, self.home)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), 'codex:global')
+
+    def test_project_preferred_over_global(self):
+        self.make_codex_skill(self.tmp)
+        self.make_codex_skill(self.home)
+        proc = detect(self.work, self.home)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(),
+                         'codex:project:%s' % self.resolved(self.tmp))
+
+    def test_signature_requires_skill_md(self):
+        """签名双条件：目录名命中但缺 SKILL.md → 不误判。"""
+        (self.tmp / '.codex' / 'skills' / 'budget-workflow').mkdir(parents=True)
+        proc = detect(self.work, self.home)
+        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(proc.stdout.strip(), 'unknown')
+
+    def test_signature_requires_dir_name(self):
+        """签名双条件：同名 skill 目录之外的 .codex/skills/other/SKILL.md → 不误判。"""
+        other = self.tmp / '.codex' / 'skills' / 'other-skill'
+        other.mkdir(parents=True)
+        (other / 'SKILL.md').write_text('---\nname: other-skill\n---\n',
+                                        encoding='utf-8')
+        proc = detect(self.work, self.home)
+        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(proc.stdout.strip(), 'unknown')
+
+    def test_project_level_sets_vars(self):
+        self.make_codex_skill(self.tmp)
+        sub = self.tmp / 'sub'
+        sub.mkdir()
+        proc = detect_vars(sub, self.home)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        expected = [
+            'kind=codex',
+            'scope=project',
+            'root=%s' % self.resolved(self.tmp),
+            'agents=%s/.codex/skills/budget-workflow/agents' % self.resolved(self.tmp),
+        ]
+        self.assertEqual(proc.stdout.splitlines(), expected)
+
+    def test_global_sets_vars(self):
+        self.make_codex_skill(self.home)
+        proc = detect_vars(self.work, self.home)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        expected = [
+            'kind=codex',
+            'scope=global',
+            'root=',
+            'agents=%s/.codex/skills/budget-workflow/agents' % self.home,
+        ]
+        self.assertEqual(proc.stdout.splitlines(), expected)
+
+
+class DetectPlatformPriorityQuadTests(SandboxTestCase):
+    """探测序优先级扩展（add-codex-platform D5）：
+    codebuddy > claudecode > codex > opencode。"""
+
+    @staticmethod
+    def make_codex_skill(base):
+        skill_dir = base / '.codex' / 'skills' / 'budget-workflow'
+        skill_dir.mkdir(parents=True)
+        (skill_dir / 'SKILL.md').write_text('---\n---\n', encoding='utf-8')
+
+    @staticmethod
+    def make_claudecode_agents(base):
+        agent_dir = base / '.claude' / 'agents'
+        agent_dir.mkdir(parents=True)
+        (agent_dir / 'architect.md').write_text('---\n---\n')
+
+    def test_claudecode_preferred_over_codex(self):
+        self.make_claudecode_agents(self.tmp)
+        self.make_codex_skill(self.tmp)
+        proc = detect(self.work, self.home)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), 'claudecode:project')
+
+    def test_codex_preferred_over_opencode(self):
+        self.make_codex_skill(self.tmp)
+        opencode_agents = self.tmp / '.opencode' / 'agent'
+        opencode_agents.mkdir(parents=True)
+        (opencode_agents / 'architect.md').write_text('---\n---\n')
+        proc = detect(self.work, self.home)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(),
+                         'codex:project:%s' % self.resolved(self.tmp))
 
 
 class SetupDispatchSmokeTests(SandboxTestCase):

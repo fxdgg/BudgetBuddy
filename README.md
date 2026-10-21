@@ -2,7 +2,7 @@
 
 **English** | [中文](README_CN.md) | [Changelog](CHANGELOG.md) | [License](LICENSE)
 
-BudgetBuddy is a multi-agent, cost-saving development workflow kit. It routes every task to the right sub-agent with the right model, so simple tasks burn cheap tokens and only hard tasks burn expensive ones. One neutral source (`core/`) builds into platform-specific distributions for **CodeBuddy**, **OpenCode**, and **Claude Code**; other agent platforms can be added by extending the build DSL (`core/platform/*.yaml`).
+BudgetBuddy is a multi-agent, cost-saving development workflow kit. It routes every task to the right sub-agent with the right model, so simple tasks burn cheap tokens and only hard tasks burn expensive ones. One neutral source (`core/`) builds into platform-specific distributions for **CodeBuddy**, **OpenCode**, **Claude Code**, and **Codex**; other agent platforms can be added by extending the build DSL (`core/platform/*.yaml`).
 
 ## What is BudgetBuddy?
 
@@ -21,7 +21,7 @@ The kit is self-bootstrapped: this repository is developed with BudgetBuddy's ow
 - **Coder Guard** — per-coder, per-task-tag failure records over a 5-attempt window; 2+ failures trigger automatic tier downgrade
 - **Goal Loop** — goal-driven macro loop: define goal → run pipeline → verify → iterate until the goal is met (max 8 iterations, safety boundaries included)
 - **OpenSpec change management** — propose / apply / archive / explore commands with spec-driven change tracking
-- **Multi-platform build** — single `core/` source, `scripts/build.py` emits `dist/codebuddy/`, `dist/opencode/`, and `dist/claudecode/`
+- **Multi-platform build** — single `core/` source, `scripts/build.py` emits `dist/codebuddy/`, `dist/opencode/`, `dist/claudecode/`, and `dist/codex/`
 - **Superpowers integration** — quality-practice skills (TDD, systematic debugging) referenced at the right phases; workflow degrades gracefully when the plugin is absent
 
 ## Installation
@@ -34,12 +34,13 @@ curl -fsSL https://raw.githubusercontent.com/fxdgg/BudgetBuddy/main/install.sh |
 
 > ⚠️ **Trust boundary**: `curl | bash` executes a remote script with your privileges. Review the script first (`curl -fsSL https://raw.githubusercontent.com/fxdgg/BudgetBuddy/main/install.sh | less`) before piping it to bash. The installer downloads the release zip and **enforces SHA256 verification** — it aborts on checksum mismatch and never installs a corrupted package.
 
-Interactive mode asks for platform (CodeBuddy / OpenCode / Claude Code / all) and scope (project / global). Non-interactive — `BUDGET_PLATFORM` accepts `codebuddy` / `opencode` / `claudecode` / `both` / `all` (`all` installs all three platforms, recommended; `both` = CodeBuddy + OpenCode, kept for historical compatibility):
+Interactive mode asks for platform (CodeBuddy / OpenCode / Claude Code / Codex / all) and scope (project / global). Non-interactive — `BUDGET_PLATFORM` accepts `codebuddy` / `opencode` / `claudecode` / `codex` / `both` / `all` (`all` installs all four platforms, recommended; `both` = CodeBuddy + OpenCode, kept for historical compatibility):
 
 ```bash
 BUDGET_PLATFORM=opencode BUDGET_GLOBAL=1 bash install.sh   # global OpenCode install
 BUDGET_PLATFORM=claudecode BUDGET_GLOBAL=1 bash install.sh # global Claude Code install
-BUDGET_PLATFORM=all bash install.sh                        # all three platforms (recommended)
+BUDGET_PLATFORM=codex BUDGET_GLOBAL=1 bash install.sh      # global Codex install
+BUDGET_PLATFORM=all bash install.sh                        # all four platforms (recommended)
 ```
 
 ### Manual install
@@ -57,10 +58,12 @@ bash install.sh
 | CodeBuddy | `.codebuddy/` (project) or `~/.codebuddy/` (global) | `~/.budgetbuddy/` |
 | OpenCode | `.opencode/` (project) or `~/.config/opencode/` (global) | `~/.budgetbuddy/` |
 | Claude Code | `.claude/` (project) or `~/.claude/` (global) | `~/.budgetbuddy/` |
+| Codex | `.codex/` (project) or `~/.codex/` (global) | `~/.budgetbuddy/` |
 
 - **CodeBuddy**: agents/rules/skills/commands land under `.codebuddy/`; hooks are injected into `settings.json` (with backup) and the Superpowers plugin is auto-enabled; the `budget` CLI is written to `~/.local/bin/budget`.
 - **OpenCode**: agents/commands/skills land under the OpenCode directory; rules are merged into `AGENTS.md` as a marked block; hooks have no native equivalent — see `core/docs/opencode-setup-notes.md` for the plugin extension point.
 - **Claude Code**: agents/commands/skills land under `.claude/` (project) or `~/.claude/` (global); rules are merged into `CLAUDE.md` (project root or `~/.claude/CLAUDE.md`) as a marked block; the management plane is shared with OpenCode under `~/.budgetbuddy/`; hooks three-event notifications are supported (Notification / PermissionRequest / SubagentStop).
+- **Codex**: skill-directory form — the workflow kit lands as `skills/budget-workflow/` (SKILL.md + reference docs + agents/rules material) under `.codex/skills/` (project) or `~/.codex/skills/` (global); a lightweight rules index (well under 1 KiB) is merged into `AGENTS.md` as a marked block (full rule text is read on demand from the skill to stay below the AGENTS.md 32 KiB doc limit); `[features] multi_agent = true` is idempotently injected into `config.toml` (with backup) to enable the multi-agent spawn tools; model IDs are deployment aliases — map them to actual models in your deployment environment before use.
 - Windows: use Git Bash or WSL (PowerShell aliases `curl` to `Invoke-WebRequest`).
 - Project and global installs can coexist; project-level takes priority.
 
@@ -86,12 +89,22 @@ bash install.sh
 
 A project-level install lands agents/commands/skills under `.claude/` and merges the rules into `CLAUDE.md` as a marked block; a global install lands under `~/.claude/` (with `~/.claude/CLAUDE.md`). Hooks three-event notifications are supported on Claude Code (Notification / PermissionRequest / SubagentStop); `budget notify "<msg>" <event>` remains available for explicit sends.
 
+### Codex
+
+```
+budget-start: Add user login API with JWT auth
+```
+
+Codex has no slash-command mechanism — say the trigger phrase (or any natural language like "start the budget workflow") and the `budget-workflow` skill activates. Prerequisites handled by the installer: `[features] multi_agent = true` is injected into `config.toml` to enable the multi-agent spawn tools, and a lightweight rules index is merged into `AGENTS.md`. Two manual prerequisites remain: (1) log in to the Codex CLI (`codex login`) — the spawn tools are only available in a signed-in session; (2) the model IDs are deployment aliases (e.g. `gpt-5.6-terra`) — map them to actual models in your deployment environment; tier lookup at spawn time uses `budget setup show` / `budget setup models`.
+
 The Leader analyzes the request, dispatches architect → dual reviewers → tiered coders → tester → final review → recorder, and reports back. For goal-driven iteration:
 
 ```
 /budget:goal "Keep improving until all tests pass and coverage >= 80%"   # CodeBuddy / Claude Code
 /budget-goal "Keep improving until all tests pass and coverage >= 80%"   # OpenCode
 ```
+
+On Codex, state the goal in natural language (e.g. `budget-goal: Keep improving until all tests pass and coverage >= 80%`) — no slash commands.
 
 ### Common commands
 
@@ -106,6 +119,8 @@ The Leader analyzes the request, dispatches architect → dual reviewers → tie
 | `/opsx:explore` | `/opsx-explore` | `/opsx:explore` | Explore ideas before proposing |
 
 Natural language triggers ("start development", "implement X", "fix X bug") activate the same workflow.
+
+On Codex, slash commands do not apply — the command bodies ship as reference docs inside the `budget-workflow` skill and are invoked with the same trigger phrases in natural language (e.g. `budget-start: <requirement>`).
 
 ### Setup subcommands (`budget setup <subcommand>`)
 
@@ -127,6 +142,45 @@ Natural language triggers ("start development", "implement X", "fix X bug") acti
 | `models` | Show the model catalog |
 | `notify "<msg>" <event>` | Send a notification (top-level `budget notify`) |
 | `help` | Show help |
+
+> On Codex, `agent preset|inherit|custom` degrade to guidance output — Codex agents have no frontmatter model to rewrite; the model tier is resolved by the Leader at spawn time from `budget-models.json` (default `balanced`). Query the tier table with `budget setup show` / `budget setup models`, and override via `platforms.codex.presets` in the models file or an explicit model on the spawn call.
+
+## Optional: OCR Pre-Review Integration
+
+BudgetBuddy's dual review (`reviewer` / `reviewer-b`) can optionally run a machine pre-review powered by the open-source Alibaba OpenCodeReview CLI (`ocr`). The pre-review acts as a **detector**: it scans the diff and surfaces candidate findings that augment the reviewers' judgment. Final verdicts and A/B/C/D ratings remain the **reviewers'** call — it is **not a gate** and never blocks the workflow.
+
+### Install
+
+```bash
+npm i -g @alibaba-group/open-code-review
+```
+
+### Model configuration (choose one)
+
+- **Standalone LLM key** — run `ocr config provider && ocr config model` and follow the prompts.
+- **Delegate mode** — run `ocr delegate` to reuse the host quota; no extra key required.
+
+### Rule set
+
+`budget setup ocr` installs the rule template distilled from the `budget-*-style` language guides to `~/.opencodereview/rule.json`:
+
+```bash
+budget setup ocr
+```
+
+- Idempotent: re-running with identical content is a no-op.
+- If the target already exists with different content, the file is backed up and confirmation is requested before overwriting; in non-interactive environments the overwrite is skipped by default.
+- A project-level `.opencodereview/rule.json` always takes priority over the global layer installed by BudgetBuddy — following the native OCR precedence: `--rule` > project > global > built-in.
+
+### Claude Code (optional speed-up)
+
+Claude Code users can add the pre-review commands to `permissions.allow` in `settings.json` to avoid repeated approvals. This is a user-side, optional configuration — BudgetBuddy does not manage it.
+
+### Graceful degradation
+
+Without the CLI, a model configuration, or the rule file installed, every BudgetBuddy workflow runs exactly as before.
+
+Official documentation: <https://open-codereview.ai>
 
 ## Architecture
 
@@ -181,11 +235,12 @@ flowchart TD
 ```mermaid
 flowchart LR
     CORE["core/ — single neutral source"] --> BP["scripts/build.py — core/platform/*.yaml"]
-    BP -->|"atomic replace"| DIST["dist/ — codebuddy / opencode / claudecode"]
+    BP -->|"atomic replace"| DIST["dist/ — codebuddy / opencode / claudecode / codex"]
     DIST --> INST["install.sh — download + SHA256 + incremental sync"]
     INST --> CB["CodeBuddy — .codebuddy/ or ~/.codebuddy/"]
     INST --> OC["OpenCode — .opencode/ or ~/.config/opencode/"]
     INST --> CC["Claude Code — .claude/ or ~/.claude/"]
+    INST --> CX["Codex — .codex/ or ~/.codex/"]
 ```
 
 ### Key rules
@@ -200,15 +255,17 @@ Component-level diagrams live in [`core/docs/architecture.md`](core/docs/archite
 
 ## Model Presets
 
-| Preset | Positioning | Typical shape | Claude Code native models | CodeBuddy typical models | OpenCode typical models |
-|--------|-------------|---------------|---------------------------|---------------------------|--------------------------|
-| `economic` | Maximum savings | Free/budget models carry most roles; premium model only for the final verdict | haiku family (`claude-haiku-5-5`) | `deepseek-v4-flash` | `deepseek/deepseek-flash` |
-| `balanced` | Balanced (recommended) | High-value models on architect/reviewer, mid-tier on coders, budget models on tester/recorder | sonnet family (`claude-sonnet-5-5`) | `deepseek-v4-flash` | `deepseek/deepseek-flash` |
-| `quality` | Maximum quality | Premium models on architect/coder-senior/director, strong models elsewhere | opus family (`claude-opus-5-5`) | `deepseek-v4-pro` | `deepseek/deepseek-v4-pro` |
+| Preset | Positioning | Typical shape | Claude Code native models | CodeBuddy typical models | OpenCode typical models | Codex typical models (deployment aliases) |
+|--------|-------------|---------------|---------------------------|---------------------------|--------------------------|--------------------------------------------|
+| `economic` | Maximum savings | Free/budget models carry most roles; premium model only for the final verdict | haiku family (`claude-haiku-5-5`) | `deepseek-v4-flash` | `deepseek/deepseek-flash` | `gpt-5.6-luna` |
+| `balanced` | Balanced (recommended) | High-value models on architect/reviewer, mid-tier on coders, budget models on tester/recorder | sonnet family (`claude-sonnet-5-5`) | `deepseek-v4-flash` | `deepseek/deepseek-flash` | `gpt-5.6-terra` |
+| `quality` | Maximum quality | Premium models on architect/coder-senior/director, strong models elsewhere | opus family (`claude-opus-5-5`) | `deepseek-v4-pro` | `deepseek/deepseek-v4-pro` | `gpt-5.6-sol` |
 
-> Typical models are the `coder_standard` role's model ID per tier in `core/models/budget-models.json`; the full per-platform preset tables are generated at build time into `dist/<platform>/docs/MODEL_SELECTION.md` (also see `budget setup models`).
+> Typical models are the `coder_standard` role's model ID per tier in `core/models/budget-models.json`; the full four-platform preset tables are generated at build time into `dist/<platform>/docs/MODEL_SELECTION.md` (also see `budget setup models`).
 >
 > The Claude Code native model IDs for the three presets were verified in a real Claude Code environment on 2026-10-20 (Claude Code CLI 2.1.304, zero warnings); use `budget setup agent custom` to override.
+>
+> The Codex preset IDs are deployment aliases — map them to actual models in your deployment environment before use. They are permanently marked unconfirmed (`platforms.codex.unconfirmed_ids`) since alias mapping cannot be verified centrally; all ten roles share one model per tier on Codex.
 
 ```bash
 budget setup agent preset economic    # switch preset (rewrites agent frontmatter)
@@ -217,7 +274,9 @@ budget setup agent inherit coder-lite            # follow the main panel model
 budget setup show                     # inspect the result
 ```
 
-The full catalog (models, tiers, costs, aliases, per-platform preset tables) is generated at build time into `dist/<platform>/docs/MODEL_SELECTION.md`.
+> On Codex these `agent preset|custom|inherit` subcommands degrade to guidance (no frontmatter model to rewrite — the Leader resolves the tier at spawn time); use `budget setup show` / `budget setup models` to inspect the tier table.
+
+The full catalog (models, tiers, costs, aliases, four-platform preset tables) is generated at build time into `dist/<platform>/docs/MODEL_SELECTION.md`.
 
 ## Execution Agents AutoRun (Approval-Free)
 
@@ -272,6 +331,7 @@ Configure once in `.budget/notify.json` (project) or `~/.budgetbuddy/notify.json
 - **Delivery semantics** — markdown payload, 5s timeout per channel, first success stops delivery, all failures are silent (never blocks the workflow)
 - **Security** — the config file is `chmod 600` (owner-only); webhook/secret values never pass through environment variables, command-line arguments, or logs; error output is sanitized to hostname only
 - **Claude Code** — hooks three-event notifications are supported (Notification / PermissionRequest / SubagentStop); `budget notify "<msg>" <event>` remains available for explicit sends
+- **Codex** — no hooks notifications: Codex hooks are experimental and the kit does not distribute them; `budget notify "<msg>" <event>` remains available for explicit sends
 
 ## Repository Layout
 
@@ -285,17 +345,18 @@ BudgetBuddy/
 │   ├── lib/               # management-plane modules (setup, state, guard, notify, ...)
 │   ├── models/            # budget-models.json + schema
 │   ├── personas/          # 5 persona themes
-│   ├── platform/          # codebuddy.yaml / claudecode.yaml / opencode.yaml mapping DSL
+│   ├── platform/          # codebuddy.yaml / claudecode.yaml / opencode.yaml / codex.yaml mapping DSL
 │   ├── rules/             # 12 rules (3 P0 + 8 code standards + rtk)
 │   ├── skills/            # budget-workflow, budget-notify, 4 openspec skills
 │   └── setup.sh           # budget setup entry
 ├── dist/                  # build output (do NOT hand-edit)
 │   ├── codebuddy/
 │   ├── claudecode/
-│   └── opencode/
+│   ├── opencode/
+│   └── codex/
 ├── scripts/               # build.py, scan-brand.py, build-release.sh
 ├── tests/                 # unit tests (python3 -m unittest)
-├── install.sh             # three-platform installer
+├── install.sh             # four-platform installer
 └── VERSION
 ```
 
@@ -303,7 +364,7 @@ BudgetBuddy/
 
 - **Edit `core/`, never `dist/`** — `dist/` is generated; hand edits are overwritten and fail the check
 - **Build & gate**: `python3 scripts/build.py --check` (also `--strict` for warning-as-error runs)
-- **Multi-platform build**: `python3 scripts/build.py [--platform <platform>]` — the valid platform list is enumerated at build time from `core/platform/*.yaml` (currently `codebuddy` / `claudecode` / `opencode`); without `--platform`, all platforms are built
+- **Multi-platform build**: `python3 scripts/build.py [--platform <platform>]` — the valid platform list is enumerated at build time from `core/platform/*.yaml` (currently `codebuddy` / `claudecode` / `opencode` / `codex`); without `--platform`, all platforms are built
 - **Brand gate**: `python3 scripts/scan-brand.py` — scans `core/`, `dist/`, `scripts/`, `install.sh`, `README.md`, `README_CN.md`, `CHANGELOG.md` for forbidden terms (the reference project's brand words); the gate must exit 0
 - **Tests**: `python3 -m unittest discover -s tests`
 - **Release**: `bash scripts/build-release.sh` — runs the check, reads `VERSION`, packages `budgetbuddy-<version>.zip` + `.sha256`

@@ -34,12 +34,16 @@
     },
     "reviewer": {
       "bash_allow": [
-        "git *"
+        "git *",
+        "command -v ocr",
+        "ocr review *"
       ]
     },
     "reviewer-b": {
       "bash_allow": [
-        "git *"
+        "git *",
+        "command -v ocr",
+        "ocr review *"
       ]
     },
     "tester": {

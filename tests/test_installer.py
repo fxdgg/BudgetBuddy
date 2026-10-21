@@ -1147,5 +1147,367 @@ class AutoRunReplayTests(InstallerSandbox):
             self.assertEqual(self._agent_bytes(name), first_bytes[name], name)
 
 
+# ---------------------------------------------------------------------------
+# codex 平台安装（add-codex-platform D4，任务 4.1）
+# ---------------------------------------------------------------------------
+
+CODEX_SKILLS = (
+    'budget-workflow', 'budget-notify', 'openspec-apply-change',
+    'openspec-archive-change', 'openspec-explore', 'openspec-propose',
+)
+CODEX_COMMANDS = (
+    'budget-start.md', 'budget-status.md', 'budget-goal.md',
+    'opsx-apply.md', 'opsx-archive.md', 'opsx-explore.md', 'opsx-propose.md',
+)
+CODEX_RULES_COUNT = 12
+
+
+class CodexProjectTests(InstallerSandbox):
+    """codex 项目级安装端到端（specs/installer codex Scenario）。
+
+    结构前缀仅 skills/（skill 形态产物）；AGENTS.fragment.md 轻量区块合并进
+    项目根 AGENTS.md（不落盘副本）；config.toml [features] multi_agent 幂等
+    注入；管理面 ~/.budgetbuddy/（与 opencode/claudecode 共享）；本地清单
+    codex: 前缀段。
+    """
+
+    def install(self):
+        result = self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'codex', 'BUDGET_GLOBAL': '0'})
+        self.assert_install_ok(result)
+        return result
+
+    def test_full_layout(self):
+        result = self.install()
+        cx = self.work / '.codex'
+        # skill 落点：6 个 skill 全集 + budget-workflow 内部结构。
+        for skill in CODEX_SKILLS:
+            self.assertTrue((cx / 'skills' / skill / 'SKILL.md').is_file(),
+                            '缺失 skill: %s' % skill)
+        bw = cx / 'skills' / 'budget-workflow'
+        for name in SUITE_AGENTS:
+            self.assertTrue((bw / 'agents' / ('%s.md' % name)).is_file(),
+                            '缺失 agent 素材: %s' % name)
+        for rel in CODEX_COMMANDS:
+            self.assertTrue((bw / 'commands' / rel).is_file(), '缺失命令: %s' % rel)
+        rules = sorted(p.name for p in (bw / 'rules').glob('*.md'))
+        self.assertEqual(len(rules), CODEX_RULES_COUNT, rules)
+        self.assertTrue((bw / 'codex-runtime.md').is_file())
+        # AGENTS.fragment.md 不复制为文件（合并进 AGENTS.md）。
+        self.assertFalse((cx / 'AGENTS.fragment.md').exists())
+        # config.toml 注入。
+        config = (cx / 'config.toml').read_text(encoding='utf-8')
+        self.assertIn('[features]', config)
+        self.assertTrue(any(
+            line.strip().replace(' ', '') == 'multi_agent=true'
+            for line in config.splitlines()), config)
+        # AGENTS.md 轻量区块（项目根）。
+        agents_md = self.work / 'AGENTS.md'
+        text = agents_md.read_text(encoding='utf-8')
+        self.assertIn(AGENTS_BEGIN, text)
+        self.assertIn(AGENTS_END, text)
+        self.assertIn('# BudgetBuddy 规则索引', text)
+        self.assertNotIn('budget-leader-no-code:begin', text)  # 轻量索引非全文合并
+        # 管理面 ~/.budgetbuddy/。
+        mgmt = self.home / '.budgetbuddy'
+        self.assertTrue((mgmt / 'setup.sh').is_file())
+        self.assertTrue((mgmt / 'lib' / 'utils.sh').is_file())
+        self.assertTrue((mgmt / 'budget-models.json').is_file())
+        self.assertTrue((mgmt / 'personas.json').is_file())
+        self.assertTrue((mgmt / 'docs' / 'MODEL_SELECTION.md').is_file())
+        # 命令包装器。
+        self.assertTrue((self.home / '.local' / 'bin' / 'budget').is_file())
+        # 摘要如实呈现 codex 形态。
+        self.assertIn('Codex（项目级）', result.stdout)
+        self.assertIn('config.toml（[features] multi_agent = true）', result.stdout)
+        self.assertIn('自然语言触发 budget-workflow skill', result.stdout)
+
+    def test_local_manifest_codex_prefix_segment(self):
+        """本地清单：platform_files 条目带 codex: 前缀（结构前缀仅 skills/）。"""
+        self.install()
+        local = load_json(self.home / '.budgetbuddy' / '.budget-manifest.json')
+        dist = load_json(self.repo / 'dist' / 'codex' / '.manifest.json')
+        struct, mgmt = split_manifest_entries(dist['files'], ('skills',))
+        # files 字段 = 管理面条目（相对 ~/.budgetbuddy/，哈希与 dist 一致）。
+        self.assertEqual(local['files'],
+                         {rel: dist['files'][rel] for rel in sorted(mgmt)})
+        # platform_files = codex: 前缀平台结构条目。
+        self.assertEqual(set(local['platform_files']),
+                         {'codex:' + rel for rel in struct})
+        for key, sha in local['platform_files'].items():
+            self.assertEqual(sha, dist['files'][key[len('codex:'):]], key)
+        # fragment 不入任何清单字段（合并产物非复制文件）。
+        self.assertNotIn('AGENTS.fragment.md', local['files'])
+        self.assertNotIn('AGENTS.fragment.md', local['platform_files'])
+
+    def test_agents_md_idempotent(self):
+        """幂等重装：AGENTS.md 区块内容不变、config 单键。"""
+        self.install()
+        first = (self.work / 'AGENTS.md').read_text(encoding='utf-8')
+        first_config = (self.work / '.codex' / 'config.toml').read_text(encoding='utf-8')
+        result = self.install()
+        second = (self.work / 'AGENTS.md').read_text(encoding='utf-8')
+        self.assertEqual(first, second)
+        self.assertEqual(1, first.count(AGENTS_BEGIN))
+        self.assertEqual(1, first.count(AGENTS_END))
+        self.assertEqual(
+            first_config,
+            (self.work / '.codex' / 'config.toml').read_text(encoding='utf-8'))
+        self.assertEqual(1, first_config.count('multi_agent'))
+        self.assertIn('跳过注入', result.stdout)
+
+    def test_agents_md_user_content_preserved(self):
+        """用户内容保护：区块外用户内容原样保留。"""
+        user_text = '# My project\n\nCustom instructions for my agents.\n'
+        (self.work / 'AGENTS.md').write_text(user_text, encoding='utf-8')
+        self.install()
+        text = (self.work / 'AGENTS.md').read_text(encoding='utf-8')
+        self.assertTrue(text.startswith(user_text))
+        self.assertIn(AGENTS_BEGIN, text)
+
+    def test_reinstall_all_skipped(self):
+        self.install()
+        dist = load_json(self.repo / 'dist' / 'codex' / '.manifest.json')
+        total = len([rel for rel in dist['files']
+                     if not rel.endswith('.fragment.md')])
+        result = self.install()
+        self.assertIn('新增 0 / 更新 0', result.stdout)
+        self.assertIn('跳过 %d' % total, result.stdout)
+
+
+class CodexGlobalTests(InstallerSandbox):
+    """codex 全局安装端到端：~/.codex/ 落点 + ~/.codex/AGENTS.md。"""
+
+    def test_global_layout(self):
+        result = self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'codex', 'BUDGET_GLOBAL': '1'})
+        self.assert_install_ok(result)
+        cx = self.home / '.codex'
+        self.assertTrue((cx / 'skills' / 'budget-workflow' / 'SKILL.md').is_file())
+        self.assertTrue((cx / 'skills' / 'budget-workflow' / 'agents'
+                         / 'architect.md').is_file())
+        self.assertTrue((cx / 'skills' / 'budget-workflow' / 'rules').is_dir())
+        self.assertTrue((cx / 'config.toml').is_file())
+        config = (cx / 'config.toml').read_text(encoding='utf-8')
+        self.assertTrue(any(
+            line.strip().replace(' ', '') == 'multi_agent=true'
+            for line in config.splitlines()), config)
+        agents_md = (cx / 'AGENTS.md').read_text(encoding='utf-8')
+        self.assertIn(AGENTS_BEGIN, agents_md)
+        self.assertIn('# BudgetBuddy 规则索引', agents_md)
+        # 管理面 ~/.budgetbuddy/。
+        self.assertTrue((self.home / '.budgetbuddy' / 'setup.sh').is_file())
+        # 项目目录不受影响。
+        self.assertFalse((self.work / '.codex').exists())
+        self.assertFalse((self.work / 'AGENTS.md').exists())
+
+
+class CodexConfigInjectTests(InstallerSandbox):
+    """inject_codex_config 四态（文本级幂等注入，design D4）。
+
+    经完整安装驱动（BUDGET_PLATFORM=codex），预置 .codex/config.toml 各形态
+    内容，断言注入结果、备份、其他配置零触碰。
+    """
+
+    def _seed_config(self, text):
+        target = self.work / '.codex' / 'config.toml'
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding='utf-8')
+        return target
+
+    def _install(self):
+        return self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'codex', 'BUDGET_GLOBAL': '0'})
+
+    @staticmethod
+    def _has_key_true(text):
+        return any(line.strip().replace(' ', '') == 'multi_agent=true'
+                   for line in text.splitlines())
+
+    def test_state1_existing_true_skips_with_spacing_tolerance(self):
+        """① 含键跳过：容忍 = 两侧空格差异（true / 无空格 / 多空格）。"""
+        for content in ('[features]\nmulti_agent = true\n',
+                        '[features]\nmulti_agent=true\n',
+                        '[features]\nmulti_agent  =  true\n'):
+            target = self._seed_config(content)
+            result = self._install()
+            self.assert_install_ok(result)
+            self.assertEqual(target.read_text(encoding='utf-8'), content)
+            self.assertIn('已含 multi_agent = true，跳过注入', result.stdout)
+            self.assertFalse((target.parent / 'config.toml.bak-budget').exists())
+            # 段内其他键零触碰。
+            self._seed_config('[features]\nfoo = "bar"\nmulti_agent = true\n')
+            result = self._install()
+            self.assert_install_ok(result)
+            self.assertIn('foo = "bar"', target.read_text(encoding='utf-8'))
+
+    def test_state2_explicit_false_respected_with_warning(self):
+        """② 显式 false：尊重用户配置零写入，告警 spawn 工具不可用，摘要如实。"""
+        content = '[features]\nmulti_agent = false\n'
+        target = self._seed_config(content)
+        result = self._install()
+        self.assert_install_ok(result)
+        self.assertEqual(target.read_text(encoding='utf-8'), content)
+        self.assertIn('尊重用户配置不注入', result.stdout)
+        self.assertIn('spawn 工具', result.stdout)
+        self.assertIn('multi_agent 被用户显式关闭（spawn 工具不可用）',
+                      result.stdout)
+        self.assertFalse((target.parent / 'config.toml.bak-budget').exists())
+
+    def test_state3_section_missing_key_injected_into_section(self):
+        """③ 段缺键：段内追加（下一个段头前），其他段零触碰，备份原始内容。"""
+        content = '[features]\nfoo = "bar"\n\n[other]\nx = 1\n'
+        target = self._seed_config(content)
+        result = self._install()
+        self.assert_install_ok(result)
+        text = target.read_text(encoding='utf-8')
+        self.assertIn('已在 config.toml [features] 段内注入', result.stdout)
+        self.assertTrue(self._has_key_true(text))
+        # 注入位于 [features] 段内（[other] 之前）。
+        self.assertLess(text.index('multi_agent'), text.index('[other]'))
+        self.assertIn('foo = "bar"', text)
+        self.assertIn('x = 1', text)
+        backup = target.parent / 'config.toml.bak-budget'
+        self.assertTrue(backup.is_file())
+        self.assertEqual(backup.read_text(encoding='utf-8'), content)
+
+    def test_state4_no_section_appended_at_end(self):
+        """④ 无段：文末追加 [features] 段，原有内容保留，备份创建。"""
+        content = 'model = "gpt-5"\n'
+        target = self._seed_config(content)
+        result = self._install()
+        self.assert_install_ok(result)
+        text = target.read_text(encoding='utf-8')
+        self.assertIn('已在 config.toml 文末追加', result.stdout)
+        self.assertIn('model = "gpt-5"', text)
+        self.assertTrue(self._has_key_true(text))
+        self.assertGreater(text.index('[features]'), text.index('model ='))
+        self.assertEqual(
+            (target.parent / 'config.toml.bak-budget').read_text(encoding='utf-8'),
+            content)
+
+    def test_section_header_line_start_precision(self):
+        """段头行首精确匹配：缩进 [features] 与 [features.xxx] 子段均不误判。"""
+        content = '  [features]\nfoo = 1\n'
+        target = self._seed_config(content)
+        result = self._install()
+        self.assert_install_ok(result)
+        text = target.read_text(encoding='utf-8')
+        self.assertIn('已在 config.toml 文末追加', result.stdout)
+        self.assertTrue(self._has_key_true(text))
+        # 追加段在文末（缩进伪段头之后），伪段头未被注入键。
+        self.assertGreater(text.index('\n[features]'),
+                           text.index('  [features]'))
+        self.assertIn('foo = 1', text)
+
+    def test_features_subsection_decoy_not_matched(self):
+        """[features.xxx] 子段含 multi_agent = false 不误判为段：
+        仍文末追加真正的 [features] 段，子段内容零触碰。"""
+        content = '[features.xxx]\nmulti_agent = false\nfoo = 1\n'
+        target = self._seed_config(content)
+        result = self._install()
+        self.assert_install_ok(result)
+        text = target.read_text(encoding='utf-8')
+        self.assertIn('已在 config.toml 文末追加', result.stdout)
+        # 子段保持原样（其 multi_agent = false 未被视作 [features] 段内键）。
+        self.assertIn('[features.xxx]\nmulti_agent = false\n', text)
+        # 新段独立存在于文末且含注入键。
+        self.assertIn('\n[features]\nmulti_agent = true\n', text)
+
+    def test_backup_not_overwritten_on_reinstall(self):
+        """备份不覆盖原始恢复点：二次安装（exists 态）不触碰备份。"""
+        content = '[features]\nfoo = "bar"\n'
+        target = self._seed_config(content)
+        self._install()
+        backup = target.parent / 'config.toml.bak-budget'
+        self.assertEqual(backup.read_text(encoding='utf-8'), content)
+        self._install()
+        self.assertEqual(backup.read_text(encoding='utf-8'), content)
+
+    def test_injection_failure_degrades_to_warning(self):
+        """注入失败（config.toml 为目录阻断原子写）→ 告警不阻断，摘要如实。"""
+        (self.work / '.codex').mkdir(parents=True)
+        (self.work / '.codex' / 'config.toml').mkdir()
+        result = self._install()
+        self.assert_install_ok(result)
+        self.assertIn('注入失败（可手动添加 [features] multi_agent = true）',
+                      result.stdout)
+        self.assertIn('config:    注入失败', result.stdout)
+
+
+class CodexBlockShapeWarningTests(InstallerSandbox):
+    """codex AGENTS.md 既有区块异形态检测（D4：opencode 全文形态告警）。"""
+
+    def _seed_agents_md(self, inner_lines):
+        block = ['<!-- BudgetBuddy:begin -->']
+        block += ['全文规则行 %d' % i for i in range(1, inner_lines + 1)]
+        block.append('<!-- BudgetBuddy:end -->')
+        (self.work / 'AGENTS.md').write_text('\n'.join(block) + '\n',
+                                             encoding='utf-8')
+
+    def _install(self):
+        return self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'codex', 'BUDGET_GLOBAL': '0'})
+
+    def test_opencode_fulltext_block_warns(self):
+        """既有区块 >100 行（opencode 全文形态特征）→ 告警混装风险，合并照常。"""
+        self._seed_agents_md(120)
+        result = self._install()
+        self.assert_install_ok(result)
+        self.assertIn('检测到 OpenCode 全文区块', result.stdout)
+        self.assertIn('120', result.stdout)
+        self.assertIn('混装', result.stdout)
+        # 合并未阻断：区块仍唯一且已替换为轻量索引形态。
+        text = (self.work / 'AGENTS.md').read_text(encoding='utf-8')
+        self.assertEqual(1, text.count(AGENTS_BEGIN))
+        self.assertIn('# BudgetBuddy 规则索引', text)
+
+    def test_light_block_no_warning(self):
+        """既有区块 ≤100 行（轻量形态）→ 无异形态告警。"""
+        self._seed_agents_md(5)
+        result = self._install()
+        self.assert_install_ok(result)
+        self.assertNotIn('检测到 OpenCode 全文区块', result.stdout)
+
+
+class CodexCoInstallManifestTests(InstallerSandbox):
+    """codex 与 opencode 双装：清单 codex: 前缀段与 opencode 无前缀段并存。"""
+
+    def install_opencode(self):
+        result = self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'opencode', 'BUDGET_GLOBAL': '0'})
+        self.assert_install_ok(result)
+        return result
+
+    def install_codex(self):
+        result = self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'codex', 'BUDGET_GLOBAL': '0'})
+        self.assert_install_ok(result)
+        return result
+
+    def test_dual_platform_segments_coexist(self):
+        self.install_opencode()
+        self.install_codex()
+        local = load_json(self.home / '.budgetbuddy' / '.budget-manifest.json')
+        oc_dist = load_json(self.repo / 'dist' / 'opencode' / '.manifest.json')
+        cx_dist = load_json(self.repo / 'dist' / 'codex' / '.manifest.json')
+        oc_struct, oc_mgmt = split_manifest_entries(
+            oc_dist['files'], ('agent', 'command', 'skill'))
+        cx_struct, cx_mgmt = split_manifest_entries(cx_dist['files'], ('skills',))
+        # opencode 段：无前缀键；codex 段：codex: 前缀键。
+        self.assertEqual(
+            {k for k in local['platform_files'] if ':' not in k}, oc_struct)
+        self.assertEqual(
+            {k for k in local['platform_files'] if k.startswith('codex:')},
+            {'codex:' + rel for rel in cx_struct})
+        # 两平台结构文件并存落盘。
+        self.assertTrue((self.work / '.opencode' / 'agent' / 'architect.md').is_file())
+        self.assertTrue((self.work / '.codex' / 'skills' / 'budget-workflow' / (
+            'SKILL.md')).is_file())
+        # 卸载其一互不破坏的对称性由 uninstall.sh 用例覆盖（2.2 闭环）；
+        # 此处断言后装 codex 的 AGENTS.md 合并不破坏 opencode 无 AGENTS.md 形态。
+        self.assertIn(AGENTS_BEGIN, (self.work / 'AGENTS.md').read_text(encoding='utf-8'))
+
+
 if __name__ == '__main__':
     unittest.main()

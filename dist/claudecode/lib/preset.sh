@@ -27,9 +27,32 @@ setup_agent() {
     detect_platform >/dev/null || true
     if [[ "${BUDGET_PLATFORM_KIND:-unknown}" == "unknown" ]]; then
         budget_print_error "未检测到已安装的 BudgetBuddy 平台形态，无法定位 agent 目录"
-        budget_print_info "提示：可设置 BUDGET_PLATFORM=codebuddy|claudecode|opencode 显式指定平台"
+        budget_print_info "提示：可设置 BUDGET_PLATFORM=codebuddy|claudecode|codex|opencode 显式指定平台"
         return 1
     fi
+
+    # codex 形态降级（design D5/D7）：agent 素材文档无 model 烘焙，档位由
+    # Leader spawn 时按 budget-models.json 查询；preset/custom/inherit 均不
+    # 修改任何文件，仅打印提示并 exit 0。
+    if [[ "${BUDGET_PLATFORM_KIND:-}" == "codex" ]]; then
+        case "$mode" in
+            preset|custom|inherit)
+                budget_print_info "codex 平台模型档位由 Leader spawn 时按 budget-models.json 查询，无 frontmatter 可切换"
+                budget_print_info "档位查询: budget setup models（预设概览）/ budget setup show（三档映射表）"
+                return 0
+                ;;
+            "")
+                budget_print_info "当前平台: codex:${BUDGET_PLATFORM_SCOPE:-}（agent 素材目录: ${BUDGET_AGENTS_DIR:-}）"
+                budget_print_info "codex 平台无 agent frontmatter 模型烘焙，模型档位由 Leader spawn 时按 budget-models.json 查询"
+                return 0
+                ;;
+            *)
+                budget_print_error "未知模式: $mode"
+                return 1
+                ;;
+        esac
+    fi
+
     if [[ -z "${BUDGET_AGENTS_DIR:-}" || ! -d "${BUDGET_AGENTS_DIR}" ]]; then
         budget_print_error "agent 目录不存在: ${BUDGET_AGENTS_DIR:-（空）}"
         return 1

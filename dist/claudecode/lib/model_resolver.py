@@ -305,6 +305,16 @@ def cmd_rewrite(data: dict, args: argparse.Namespace) -> int:
     """批量重写 agent frontmatter model 字段（preset/custom/inherit）。"""
     platform = args.platform
     agents_dir = args.agents_dir
+
+    # codex 形态降级（design D5/D7）：agent 素材文档无 model 烘焙、无
+    # frontmatter 可切换；档位由 Leader spawn 时按 budget-models.json 查询。
+    # 返回明确语义（提示 + 不修改任何文件），不抛错；CLI 侧 preset.sh 已
+    # 于入口降级，此处为直接调用 resolver 的兜底。
+    if platform == 'codex':
+        print('codex 平台模型档位由 Leader spawn 时按 budget-models.json 查询，'
+              '无 frontmatter 可切换；本命令不修改任何文件')
+        return 0
+
     roles = data.get('roles', [])
     role_by_filename = {role.replace('_', '-'): role for role in roles}
 

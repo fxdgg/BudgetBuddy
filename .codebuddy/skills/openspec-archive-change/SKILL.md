@@ -6,12 +6,9 @@ compatibility: Requires openspec CLI.
 metadata:
   author: openspec
   version: "1.0"
-  generatedBy: "1.5.0"
 ---
 
 Archive a completed change in the experimental workflow.
-
-**Store selection:** If the user names a store (a store is a standalone OpenSpec repo registered on this machine) or the work lives in one, run `openspec store list --json` to discover registered store ids, then pass `--store <id>` on the commands that read or write specs and changes (`new change`, `status`, `instructions`, `list`, `show`, `validate`, `archive`, `doctor`, `context`). Other commands do not take the flag. Hints printed by commands already carry the flag; keep it on follow-ups. Without a store, commands act on the nearest local `openspec/` root.
 
 **Input**: Optionally specify a change name. If omitted, check if it can be inferred from conversation context. If vague or ambiguous you MUST prompt for available changes.
 
@@ -32,7 +29,6 @@ Archive a completed change in the experimental workflow.
 
    Parse the JSON to understand:
    - `schemaName`: The workflow being used
-   - `planningHome`, `changeRoot`, `artifactPaths`, and `actionContext`: path and scope context
    - `artifacts`: List of artifacts with their status (`done` or other)
 
    **If any artifacts are not `done`:**
@@ -55,7 +51,7 @@ Archive a completed change in the experimental workflow.
 
 4. **Assess delta spec sync state**
 
-   Use `artifactPaths.specs.existingOutputPaths` from status JSON to check for delta specs. If none exist, proceed without sync prompt.
+   Check for delta specs at `openspec/changes/<name>/specs/`. If none exist, proceed without sync prompt.
 
    **If delta specs exist:**
    - Compare each delta spec with its corresponding main spec at `openspec/specs/<capability>/spec.md`
@@ -66,23 +62,23 @@ Archive a completed change in the experimental workflow.
    - If changes needed: "Sync now (recommended)", "Archive without syncing"
    - If already synced: "Archive now", "Sync anyway", "Cancel"
 
-   If user chooses sync, use Task tool (subagent_type: "general-purpose", prompt: "Use Skill tool to invoke openspec-sync-specs for change '<name>'. Delta spec analysis: <include the analyzed delta spec summary>"). Proceed to archive regardless of choice.
+   If user chooses sync, 按上述分析得到的 delta spec 语义，将变更规格同步至主 specs 目录（openspec CLI 的归档流程已含此步骤，若 CLI 未自动完成则手动执行 openspec archive）。Proceed to archive regardless of choice.
 
 5. **Perform the archive**
 
-   Create an `archive` directory under `planningHome.changesDir` if it doesn't exist:
+   Create the archive directory if it doesn't exist:
    ```bash
-   mkdir -p "<planningHome.changesDir>/archive"
+   mkdir -p openspec/changes/archive
    ```
 
    Generate target name using current date: `YYYY-MM-DD-<change-name>`
 
    **Check if target already exists:**
    - If yes: Fail with error, suggest renaming existing archive or using different date
-   - If no: Move `changeRoot` to the archive directory
+   - If no: Move the change directory to archive
 
    ```bash
-   mv "<changeRoot>" "<planningHome.changesDir>/archive/YYYY-MM-DD-<name>"
+   mv openspec/changes/<name> openspec/changes/archive/YYYY-MM-DD-<name>
    ```
 
 6. **Display summary**
@@ -101,11 +97,20 @@ Archive a completed change in the experimental workflow.
 
 **Change:** <change-name>
 **Schema:** <schema-name>
-**Archived to:** the archive path derived from `planningHome.changesDir`/YYYY-MM-DD-<name>/
+**Archived to:** openspec/changes/archive/YYYY-MM-DD-<name>/
 **Specs:** ✓ Synced to main specs (or "No delta specs" or "Sync skipped")
 
 All artifacts complete. All tasks complete.
 ```
+
+## Branch Integration Strategy
+
+Before archiving, assess the branch strategy:
+1. **Merge**: If changes are complete and tested, merge to main
+2. **PR**: If changes need review, create a pull request
+3. **Keep**: If changes are experimental or incomplete, keep branch open
+
+Use the `superpowers:finishing-a-development-branch` skill to decide the strategy.
 
 **Guardrails**
 - Always prompt for change selection if not provided
@@ -113,5 +118,5 @@ All artifacts complete. All tasks complete.
 - Don't block archive on warnings - just inform and confirm
 - Preserve .openspec.yaml when moving to archive (it moves with the directory)
 - Show clear summary of what happened
-- If sync is requested, use openspec-sync-specs approach (agent-driven)
+- If sync is requested, 按 delta spec 语义将变更规格同步至主 specs 目录（openspec CLI 的归档流程已含此步骤，若 CLI 未自动完成则手动执行 openspec archive）
 - If delta specs exist, always run the sync assessment and show the combined summary before prompting

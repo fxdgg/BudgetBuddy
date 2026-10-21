@@ -3,9 +3,9 @@
 ## Purpose
 TBD - created by archiving change foundation. Update Purpose after archive.
 ## Requirements
-### Requirement: setup.sh 子命令体系
+### Requirement: setup.sh 子命令体系（preset codex 降级语义）
 
-`core/setup.sh`（产物平移至 dist 双平台）提供子命令全集（design.md §8.1/A11）：`init`（初始化安装/注入；`init shell` 注入 shell 别名）、`show`（展示当前 agent 模型配置）、`agent preset|inherit|custom`（模型预设切换/覆写）、`persona list|set|expand|show`（主题管理）、`validate`（完整性校验）、`diff [preset]`（当前 vs 预设对比）、`stats`（工作流统计）、`update`（增量更新）、`reinstall`（uninstall+init 组合重装）、`uninstall`（卸载）、`guard`（Coder Guard 查询/重置）、`quickstart`（别名 tour/wizard，快速上手引导）、`models`（模型目录查看）、`help`；独立入口 `budget notify` 与 `budget status`；`budget update` 为 `budget setup update` 的顶层快捷别名。环境变量前缀统一 `BUDGET_*`（BUDGET_GLOBAL/BUDGET_DIR/BUDGET_PLATFORM）。【MUST】
+`core/setup.sh`（产物平移至 dist 双平台）提供子命令全集（design.md §8.1/A11）：`init`（初始化安装/注入；`init shell` 注入 shell 别名）、`show`（展示当前 agent 模型配置）、`agent preset|inherit|custom`（模型预设切换/覆写）、`persona list|set|expand|show`（主题管理）、`validate`（完整性校验）、`diff [preset]`（当前 vs 预设对比）、`stats`（工作流统计）、`update`（增量更新）、`reinstall`（uninstall+init 组合重装）、`uninstall`（卸载）、`guard`（Coder Guard 查询/重置）、`quickstart`（别名 tour/wizard，快速上手引导）、`models`（模型目录查看）、`help`；独立入口 `budget notify` 与 `budget status`；`budget update` 为 `budget setup update` 的顶层快捷别名。环境变量前缀统一 `BUDGET_*`（BUDGET_GLOBAL/BUDGET_DIR/BUDGET_PLATFORM）。子命令全集不变；codex 探测形态下 `agent preset|custom|inherit` 降级为提示语（「codex 平台模型档位由 Leader 在 spawn 派工时按 budget-models.json 查询，无 agent frontmatter 可切换；档位查看 `budget setup show`/`budget setup models`」，exit 0 不报错）；`show` 在 codex 形态输出三档映射表（economic/balanced/quality → gpt-5.6-luna/terra/sol）。其余子命令（models/persona/guard/notify/validate/uninstall）codex 形态正常工作。【MUST】
 
 #### Scenario: show 输出
 - **WHEN** 在已安装项目执行 `budget setup show`
@@ -19,6 +19,16 @@ TBD - created by archiving change foundation. Update Purpose after archive.
 - **WHEN** 执行 `budget setup quickstart`（或别名 tour/wizard）
 - **THEN** 启动 lib/quickstart.py 快速上手引导（lib 模块有对应入口，无死代码）
 
+#### Scenario: codex preset 降级提示
+
+- **WHEN** codex 形态执行 `budget setup agent preset balanced`
+- **THEN** 输出降级提示并 exit 0（无文件被修改）
+
+#### Scenario: codex show 三档表
+
+- **WHEN** codex 形态执行 `budget setup show`
+- **THEN** 输出 codex 三档模型映射与查表说明
+
 ### Requirement: budget CLI 包装器
 
 安装器/setup init 写入 `~/.local/bin/budget` 包装脚本，转发 `setup`/`notify`/`status`/`update` 子命令到实际脚本；幂等重装不产生坏符号链接（design.md §8.1）。【MUST】
@@ -29,7 +39,7 @@ TBD - created by archiving change foundation. Update Purpose after archive.
 
 ### Requirement: platform.sh 运行时平台探测
 
-`core/lib/platform.sh` 按序探测：① 向上查找 `.codebuddy/setup.sh` → codebuddy 项目级；② `~/.codebuddy/setup.sh` → codebuddy 全局；③ 向上查找 `.claude/agents/` 含本套件 agent → claudecode 项目级；④ `~/.claude/agents/` 含本套件 agent → claudecode 全局；⑤ `.opencode/agent/`（项目级，优先）或 `~/.config/opencode/agent/`（全局）存在本套件 agent → opencode；全部未命中 → 显式报错并列出已检测位置（不静默猜默认）。同时命中多个形态时按探测序取先（codebuddy > claudecode > opencode）。探测结果驱动 `agent preset/custom` 与 hooks 注入的落点（claudecode 形态下 hooks 注入跳过）；`BUDGET_PLATFORM=claudecode` 显式覆盖分支与现有模式一致。【MUST】
+`core/lib/platform.sh` 按序探测：① 向上查找 `.codebuddy/setup.sh` → codebuddy 项目级；② `~/.codebuddy/setup.sh` → codebuddy 全局；③ 向上查找 `.claude/agents/` 含本套件 agent → claudecode 项目级；④ `~/.claude/agents/` → claudecode 全局；⑤ 向上查找 `.codex/skills/budget-workflow/`（**SKILL.md 套件签名校验**）→ codex:project；⑥ `~/.codex/skills/budget-workflow/`（同签名校验）→ codex:global；⑦ `.opencode/agent/`（项目级，优先）或 `~/.config/opencode/agent/`（全局）存在本套件 agent → opencode；全部未命中 → 显式报错并列出已检测位置（不静默猜默认）。同时命中多个形态时按探测序取先（codebuddy > claudecode > codex > opencode）。探测结果驱动管理面落点（codex 形态 agent 目录语义 = skill 内 agents/ 素材目录；claudecode 形态下 hooks 注入跳过）；`BUDGET_PLATFORM=codex` 显式覆盖分支同现有模式。【MUST】
 
 #### Scenario: codebuddy 项目级探测
 
@@ -52,10 +62,20 @@ TBD - created by archiving change foundation. Update Purpose after archive.
 - **WHEN** 仅存在 `~/.claude/agents/` 本套件 agent 文件
 - **THEN** 探测为 claudecode 全局，`BUDGET_PLATFORM_KIND=claudecode`
 
+#### Scenario: codex 项目级探测
+
+- **WHEN** 在含 `.codex/skills/budget-workflow/SKILL.md` 的项目子目录执行 setup
+- **THEN** 探测为 codex:project，BUDGET_AGENTS_DIR 指向该项目 skill 内 agents/ 目录
+
+#### Scenario: codex 全局探测
+
+- **WHEN** 仅存在 `~/.codex/skills/budget-workflow/SKILL.md`
+- **THEN** 探测为 codex:global
+
 #### Scenario: 探测失败显式报错
 
 - **WHEN** 全部探测均未命中本套件安装形态
-- **THEN** 报错并列出已检测路径（含 .claude 两级），不以默认值静默继续
+- **THEN** 报错并列出已检测路径（含 .claude 与 .codex 各两级），不以默认值静默继续
 
 ### Requirement: lib 24 文件模块化
 

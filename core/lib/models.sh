@@ -45,14 +45,14 @@ print('')
 
 
 def platform_mark(platforms):
-    """平台可用性短标：N 平台（计数动态）/ cb / oc / cc。"""
+    """平台可用性短标：N 平台（计数动态）/ cb / oc / cc / cx。"""
     count = len(platforms)
     if count >= 2:
-        # 计数文案动态化（双平台/三平台/…），随 platforms 键集自动扩展
-        return {2: '双平台', 3: '三平台'}.get(count, '%d 平台' % count)
+        # 计数文案动态化（双平台/三平台/四平台/…），随 platforms 键集自动扩展
+        return {2: '双平台', 3: '三平台', 4: '四平台'}.get(count, '%d 平台' % count)
     if platforms:
         return {'codebuddy': 'cb', 'opencode': 'oc',
-                'claudecode': 'cc'}.get(platforms[0], platforms[0])
+                'claudecode': 'cc', 'codex': 'cx'}.get(platforms[0], platforms[0])
     return '-'
 
 

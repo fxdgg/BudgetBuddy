@@ -93,6 +93,43 @@ budget_cmd_show() {
     budget_print_info "模型目录: $BUDGET_MODELS_FILE"
     echo ""
 
+    # codex 形态：agent 素材文档无 model 烘焙，改为渲染三档映射表（design
+    # D5/D7，数据源 platforms.codex.presets——档内十角色统一模型，取任一角色
+    # 值即档位模型）
+    if [[ "${BUDGET_PLATFORM_KIND:-}" == "codex" ]]; then
+        BUDGET_SHOW_MODELS_FILE="$BUDGET_MODELS_FILE" "$BUDGET_PYTHON" << 'PYEOF'
+import json
+import os
+
+models_file = os.environ.get('BUDGET_SHOW_MODELS_FILE', '')
+if not models_file or not os.path.isfile(models_file):
+    print('（警告: 未找到 budget-models.json）')
+    raise SystemExit(0)
+try:
+    with open(models_file, encoding='utf-8') as f:
+        data = json.load(f)
+except (OSError, ValueError):
+    print('（警告: budget-models.json 解析失败）')
+    raise SystemExit(0)
+
+presets = data.get('platforms', {}).get('codex', {}).get('presets', {})
+labels = {'economic': '省钱优先', 'balanced': '均衡（默认）', 'quality': '质量优先'}
+print('Codex 模型档位映射（三档，档内十角色统一模型）：')
+print('  %-10s %-16s %s' % ('档位', '模型', '定位'))
+for name in ('economic', 'balanced', 'quality'):
+    model = '-'
+    tier = presets.get(name)
+    if isinstance(tier, dict) and tier:
+        model = next(iter(tier.values()))
+    print('  %-10s %-16s %s' % (name, model, labels.get(name, '-')))
+print('')
+print('模型选择发生在 Leader spawn_agent 调用参数（查本表传递，见 codex-runtime.md），')
+print('agent 素材文档无 model 烘焙；agent preset/custom/inherit 子命令已降级。')
+print('逃生门: 编辑 budget-models.json platforms.codex.presets，或 spawn 时显式传 model。')
+PYEOF
+        return 0
+    fi
+
     BUDGET_SHOW_AGENTS_DIR="${BUDGET_AGENTS_DIR:-}" \
     BUDGET_SHOW_MODELS_FILE="$BUDGET_MODELS_FILE" \
         "$BUDGET_PYTHON" << 'PYEOF'
@@ -415,6 +452,7 @@ budget_cmd_help() {
   uninstall      卸载
   guard ...      Coder Guard 查询/重置
   quickstart     快速上手引导（别名 tour / wizard）
+  ocr            OCR 预审集成安装与状态检测
   models         模型目录查看
   notify <消息> <事件名>  发送通知（独立入口 budget notify）
   help           显示本帮助
@@ -422,7 +460,7 @@ budget_cmd_help() {
 环境变量（BUDGET_* 前缀）:
   BUDGET_GLOBAL   全局模式标志（1=全局）
   BUDGET_DIR      运行时数据目录覆盖（默认 .budget/ > ~/.budgetbuddy/）
-  BUDGET_PLATFORM 显式指定平台（codebuddy|claudecode|opencode，跳过运行时探测）
+  BUDGET_PLATFORM 显式指定平台（codebuddy|claudecode|codex|opencode，跳过运行时探测）
 EOF
 }
 
@@ -537,6 +575,15 @@ budget_main() {
                 exec "$BUDGET_PYTHON" "$BUDGET_LIB_DIR/quickstart.py" "$@"
             fi
             budget_print_error "子命令 'quickstart' 的实现模块尚未安装（lib/quickstart.py）"
+            budget_print_info "请先完成安装或更新：budget setup update"
+            return 1
+            ;;
+        ocr)
+            if [[ -f "$BUDGET_LIB_DIR/ocr-setup.py" ]]; then
+                shift
+                exec "$BUDGET_PYTHON" "$BUDGET_LIB_DIR/ocr-setup.py" "$@"
+            fi
+            budget_print_error "子命令 'ocr' 的实现模块尚未安装（lib/ocr-setup.py）"
             budget_print_info "请先完成安装或更新：budget setup update"
             return 1
             ;;

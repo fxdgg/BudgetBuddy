@@ -1,6 +1,6 @@
 # BudgetBuddy 开发指南（自举说明）
 
-> **三入口说明**：本文件与 `AGENTS.md` 内容一致、互为指针。CodeBuddy 会话读取本文件（`CODEBUDDY.md`）；OpenCode 会话读取 `AGENTS.md`；Claude Code 会话经安装器将 `CLAUDE.fragment.md` 标记区块幂等合并进 `CLAUDE.md` 读取（构建产物，禁手改）。三份载体描述同一套约定，任选其一遵守即可；修改时必须同步更新 `CODEBUDDY.md` 与 `AGENTS.md` 两份（Claude Code 侧随 `core/` 构建再生）。
+> **四入口说明**：本文件与 `AGENTS.md` 内容一致、互为指针。CodeBuddy 会话读取本文件（`CODEBUDDY.md`）；OpenCode 会话读取 `AGENTS.md`；Claude Code 会话经安装器将 `CLAUDE.fragment.md` 标记区块幂等合并进 `CLAUDE.md` 读取（构建产物，禁手改）；Codex 会话经安装器在 `.codex/skills/`（项目级）或 `~/.codex/skills/`（全局）落位 skill 目录、并将 `AGENTS.fragment.md` 轻量规则索引（<1KiB，规避 AGENTS.md 32KiB 截断）幂等合并进项目根 `AGENTS.md`（全局形态合并进 `~/.codex/AGENTS.md`）区块读取。四份载体描述同一套约定，任选其一遵守即可；修改时必须同步更新 `CODEBUDDY.md` 与 `AGENTS.md` 两份（Claude Code 侧随 `core/` 构建再生）。
 >
 > **自举声明**：本仓库使用 BudgetBuddy 套件自身的工作流开发（dogfooding）。你正运行在该工作流定义的角色与规则之下。
 
@@ -16,17 +16,18 @@ BudgetBuddy/
 │   ├── lib/               # 管理面模块（基础层/生命周期/模型/状态/展示/通知六组）
 │   ├── models/            # budget-models.json + budget-models.schema.json
 │   ├── personas/          # personas.json（5 主题 × 11 角色键）
-│   ├── platform/          # codebuddy.yaml / claudecode.yaml / opencode.yaml（构建映射 DSL）
+│   ├── platform/          # codebuddy.yaml / claudecode.yaml / opencode.yaml / codex.yaml（构建映射 DSL）
 │   ├── rules/             # 12 条规则（3 条 P0 + 8 条代码规范 + rtk）
 │   ├── skills/            # budget-workflow、budget-notify、4 个 openspec skill
 │   └── setup.sh           # budget setup 管理入口
-├── dist/                  # 三平台构建产物 — 禁止手改（生成物，会被覆盖）
+├── dist/                  # 四平台构建产物 — 禁止手改（生成物，会被覆盖）
 │   ├── codebuddy/
 │   ├── claudecode/
-│   └── opencode/
+│   ├── opencode/
+│   └── codex/
 ├── scripts/               # build.py（构建）、scan-brand.py（品牌门禁）、build-release.sh（打包）
 ├── tests/                 # 单元测试（unittest）
-├── install.sh             # 三平台安装器
+├── install.sh             # 四平台安装器
 ├── openspec/              # 变更管理（proposal/design/specs/tasks）
 └── VERSION                # 当前版本号（0.1.0）
 ```
@@ -70,6 +71,6 @@ bash scripts/build-release.sh             # check → 读 VERSION → zip + .sha
 ## 面向 AI 会话的行为约定
 
 - 你在本仓库中的角色由当前工作流分派（Leader / architect / coder-* / reviewer / tester / recorder / director / goal-evaluator）；遵守对应 agent 定义与 P0 三规则（leader-no-code / coder-guard / 流程强制）
-- 修改 `core/**` 后必须运行构建，确认三平台产物同步更新且无告警
+- 修改 `core/**` 后必须运行构建，确认四平台产物同步更新且无告警
 - 修改文档（README/CHANGELOG 等）时注意它们在品牌门禁扫描范围内
 - 输出语言以中文为主，代码/命令/路径保留英文

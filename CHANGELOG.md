@@ -4,6 +4,35 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-20
+
+### Added
+
+- **Execution agents AutoRun (approval-free)** — CodeBuddy sub-agents: new optional `auto_run` boolean in the neutral source (`core/agents/*.md`) mapped to frontmatter `enabledAutoRun: true` (only when present, same emit rule as `max_turns`); on by default for the 4 execution agents (coder-lite / coder-standard / coder-senior / tester) while the other 6 keep per-call approval; new `budget setup autorun list|on|off` subcommand lets users opt the rest in — choices persist in the user data dir `~/.budgetbuddy/auto-run.json` (survives uninstall, replayed on reinstall; `apply` is an internal replay command, not user-facing); install-time replay keeps choices across upgrades; `budget setup update` touches neither agent files nor the state file; OpenCode needs no change (permission map `allow` is already approval-free for these agents) and Claude Code has no per-sub-agent switch (falls back to settings.json permissions guidance); `autorun on` output lists the agent's approval-free bash patterns with an explicit safety notice — AutoRun makes every tool call in scope approval-free, approval is the last manual gate
+
+### Known Limitations
+
+- Claude Code has no per-sub-agent auto-run switch — approval remains with the session permission mode / `settings.json` permissions (`budget setup autorun` prints this alternative guidance and exits 0 without changing anything); OpenCode needs no change (permission map `allow` is already approval-free for the 4 execution agents)
+- IDE-behavior verification pending — three items await end-to-end verification in a real IDE session: the Auto Run settings-page switch vs frontmatter `enabledAutoRun` priority, the write form when the IDE turns Auto Run off (line removal vs `enabledAutoRun: false`), and the `enabledAutoRun` × `permissionMode` (plan/acceptEdits) hierarchy (verification records: `openspec/changes/agent-autorun/verification-open-questions.md`)
+
+### Tests
+
+- 709 → 753 test cases (+44: build emit/rewrite/validate + `.bash-patterns.json` data-file coverage, new `tests/test_autorun.py` suite, installer AutoRun replay integration)
+
+## [0.2.1] - 2026-10-20
+
+### Added
+
+- **Claude Code hooks notification adaptation** — three events (Notification / PermissionRequest / SubagentStop) delivered via the injection engine's data-driven `HOOK_EVENTS_JSON` event manifest, with payload-driven compatibility in the notify hook
+
+### Changed
+
+- **Hooks injection engine event manifest parameterized** — the injected event list is now sourced from `HOOK_EVENTS_JSON` (CodeBuddy default three-event behavior unchanged)
+
+### Fixed
+
+- **Installer co-install scenario claudecode hooks injection misjudgment** — form snapshot + explicit `settings_file` + result marker returned from the injection subshell, so Claude Code hooks are correctly injected when multiple platforms share `~/.budgetbuddy/`
+
 ## [0.2.0] - 2026-10-20
 
 ### Added

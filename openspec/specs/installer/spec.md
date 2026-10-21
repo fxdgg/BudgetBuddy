@@ -5,7 +5,7 @@ TBD - created by archiving change foundation. Update Purpose after archive.
 ## Requirements
 ### Requirement: 双平台安装落点
 
-install.sh 支持多平台安装（design.md §10）：codebuddy → dist/codebuddy/ 结构文件复制到 `.codebuddy/`（项目）或 `~/.codebuddy/`（全局），写 `~/.local/bin/budget` 包装器，hooks 注入 settings.json（含 superpowers 插件启用）；opencode → `dist/opencode/{agent,command,skill}` 复制到 `~/.config/opencode/`（全局）或 `.opencode/`（项目），AGENTS.fragment.md 幂等合并进对应 AGENTS.md；claudecode → `dist/claudecode/{agents,commands,skills}` 复制到 `.claude/`（项目）或 `~/.claude/`（全局），CLAUDE.fragment.md 幂等合并进对应 CLAUDE.md；管理面（setup.sh/lib/models/personas/docs）统一装 `~/.budgetbuddy/`（A3，docs → `~/.budgetbuddy/docs/`）。`both` 模式依次执行 codebuddy+opencode（历史兼容语义不变），`all` 模式依次执行全部平台；claudecode 本地清单 mode 与 opencode 同构拆分（`files` = 管理面条目 + `platform_files` = 平台结构条目，fragment 文件不入 files）。【MUST】
+install.sh 支持多平台安装（design.md §10）：codebuddy → dist/codebuddy/ 结构文件复制到 `.codebuddy/`（项目）或 `~/.codebuddy/`（全局），写 `~/.local/bin/budget` 包装器，hooks 注入 settings.json（含 superpowers 插件启用）；opencode → `dist/opencode/{agent,command,skill}` 复制到 `~/.config/opencode/`（全局）或 `.opencode/`（项目），AGENTS.fragment.md 幂等合并进对应 AGENTS.md；claudecode → `dist/claudecode/{agents,commands,skills,hooks}` 复制到 `.claude/`（项目）或 `~/.claude/`（全局），CLAUDE.fragment.md 幂等合并进对应 CLAUDE.md，**hooks/budget-notify-hook.py 分发后注入 settings.json（Notification/PermissionRequest/SubagentStop 三事件，不含 superpowers）**；管理面（setup.sh/lib/models/personas/docs）统一装 `~/.budgetbuddy/`（A3，docs → `~/.budgetbuddy/docs/`）。`both` 模式依次执行 codebuddy+opencode（历史兼容语义不变），`all` 模式依次执行全部平台；claudecode 本地清单 mode `claudecode` 合并写（files 管理面幂等 + platform_files 按平台命名空间合并）。【MUST】
 
 #### Scenario: codebuddy 项目级安装
 
@@ -17,10 +17,10 @@ install.sh 支持多平台安装（design.md §10）：codebuddy → dist/codebu
 - **WHEN** 以全局模式安装 opencode 平台
 - **THEN** ~/.config/opencode/ 下出现 agent/command/skill 结构文件，~/.budgetbuddy/ 出现管理面（含 docs/），AGENTS.md 含标记区块
 
-#### Scenario: claudecode 项目级安装
+#### Scenario: claudecode 项目级安装（hooks 注入）
 
 - **WHEN** 在空目录以项目模式安装 claudecode 平台
-- **THEN** 生成 .claude/{agents×10,commands(budget×3+opsx×4),skills×6,CLAUDE.fragment.md 合并入项目根 CLAUDE.md}，~/.budgetbuddy/ 出现管理面，`budget setup show` 可执行
+- **THEN** 生成 .claude/{agents×10,commands×7,skills×6,hooks/budget-notify-hook.py,CLAUDE.fragment.md 合并入项目根 CLAUDE.md}，`.claude/settings.json` 含三事件 hook 条目（备份 `.bak-budget` 已生成），~/.budgetbuddy/ 出现管理面，`budget setup show` 可执行
 
 #### Scenario: all 模式三平台
 
@@ -109,4 +109,28 @@ opencode 安装将 AGENTS.fragment.md 合并进目标 AGENTS.md（项目根或 `
 #### Scenario: 仓库地址可配置
 - **WHEN** `BUDGET_REPO_URL` 指向自建镜像
 - **THEN** 在线安装从该地址拉取 install.sh 与产物 zip
+
+### Requirement: 安装后 AutoRun 状态重放
+
+`install.sh` 的 `install_codebuddy` 分支在 manifest 增量同步（含升级差集清理）完成后、写入本地清单前（钩子落点：`upgrade_diff_cleanup` 调用之后、`write_local_manifest` 调用之前；install.sh L929/L936，行号随文件演进以锚点函数名称为准），若全局状态文件 `~/.budgetbuddy/auto-run.json` 存在，则以刚同步的 `lib/autorun.py` 执行 `apply`（清单内 agent 确保 `enabledAutoRun: true`、清单外确保删除该行），将用户持久化选择重放到本次同步可能被 dist 默认值覆盖的 agent 文件上；重放失败（含状态文件损坏）仅告警（提示 `budget setup autorun` 修复），不阻断安装主流程、不影响本地清单写入、不覆盖写状态文件。状态文件不存在时不执行重放（dist 默认值 = 4 个执行类 agent 免审批）。opencode/claudecode 分支无此钩子（两平台不映射 auto-run）。【MUST】
+
+#### Scenario: 升级安装后用户选择保持
+
+- **WHEN** 用户状态文件为「默认 4 个 + reviewer」，重新运行新版本 install.sh（agent 文件被新 dist 覆盖）
+- **THEN** 同步后重放执行：reviewer 恢复 `enabledAutoRun: true`，4 个默认 agent 仍在位，其余 5 个不含该键
+
+#### Scenario: 无状态文件不重放
+
+- **WHEN** 首次安装且 `~/.budgetbuddy/auto-run.json` 不存在
+- **THEN** 安装不执行 apply，agent 文件保持 dist 原样（4 个执行类 agent 含 `enabledAutoRun: true`）
+
+#### Scenario: apply 失败降级告警
+
+- **WHEN** 状态文件存在但内容损坏（JSON 解析失败）导致 apply 非零退出
+- **THEN** 安装流程继续（本地清单正常写入），输出告警提示用户运行 `budget setup autorun list` 检查状态；状态文件字节保持原样（apply 不得覆盖写）
+
+#### Scenario: 重放不影响安装幂等性
+
+- **WHEN** 连续两次运行 install.sh：无状态文件、或状态与 dist 默认一致（默认 4 个执行类 agent）时，第二次同步全部哈希跳过（SYNC_SKIPPED，SYNC_UPDATED=0）；非默认状态（如「默认 4 个 + reviewer」）下，reviewer 经 apply 补丁后其文件哈希 ≠ dist 清单哈希，第二次同步先以 dist 重覆盖该偏差 agent（SYNC_UPDATED>0，`enabledAutoRun` 被 dist 默认值冲掉），再由 apply 重放恢复
+- **THEN** 两种路径终态均与首次一致（reviewer 恢复 `enabledAutoRun: true`、默认 4 个仍在位、其余不含该键），且 apply 为字节级幂等（重复执行文件字节不变），安装主流程正常完成
 

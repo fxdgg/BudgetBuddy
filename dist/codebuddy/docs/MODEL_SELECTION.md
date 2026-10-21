@@ -24,6 +24,9 @@
 | gemini | gemini-3.5-flash | mid | x0.99 | agent, tool-use, fast | codebuddy, opencode | Terminal-Bench 76.2%、MCP Atlas 83.6%、Agent Elo 1656 |
 | gemini | gemini-2.5-pro | mid | x0.90 | reasoning | codebuddy, opencode | 已弃用：路由稳定性问题，不推荐用作 agent 模型 |
 | gemini | gemini-3.1-pro | mid | x1.32 | general | codebuddy, opencode |  |
+| gpt | gpt-5.6-luna | budget | x0.18 | code, fast | codex | 部署别名：需在部署环境将别名映射到实际模型（本机 codex 无该别名映射可核对，永久标注于 platforms.codex.unconfirmed_ids，映射就绪后移除）；cost 参照组内同档条目，实际定价以部署环境为准 |
+| gpt | gpt-5.6-sol | top | x3.31 | code, reasoning | codex | 部署别名：需在部署环境将别名映射到实际模型（本机 codex 无该别名映射可核对，永久标注于 platforms.codex.unconfirmed_ids，映射就绪后移除）；cost 参照组内同档条目，实际定价以部署环境为准 |
+| gpt | gpt-5.6-terra | mid | x1.25 | code, general | codex | 部署别名：需在部署环境将别名映射到实际模型（本机 codex 无该别名映射可核对，永久标注于 platforms.codex.unconfirmed_ids，映射就绪后移除）；cost 参照组内同档条目，实际定价以部署环境为准 |
 | gpt | gpt-5.5 | top | x3.31 | general | codebuddy, opencode |  |
 | gpt | gpt-5.4 | top | x1.65 | general | codebuddy, opencode |  |
 | gpt | gpt-5.3-codex | mid | x1.25 | code | codebuddy, opencode |  |
@@ -55,18 +58,18 @@
 
 ## 预设总览（三档 × 全部平台）
 
-| 角色 | claudecode economic | claudecode balanced | claudecode quality | codebuddy economic | codebuddy balanced | codebuddy quality | opencode economic | opencode balanced | opencode quality |
-|------|------|------|------|------|------|------|------|------|------|
-| architect | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | deepseek-v4-pro | glm-5.2 | claude-opus-4.7-1m | deepseek/deepseek-v4-pro | zhipu/glm-5.2 | anthropic/claude-opus-4.7 |
-| coder_lite | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | hy3 | hy3 | deepseek-v4-flash | opencode/glm-5.3-flash-free | opencode/glm-5.3-flash-free | deepseek/deepseek-flash |
-| coder_standard | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | deepseek-v4-flash | deepseek-v4-flash | deepseek-v4-pro | deepseek/deepseek-flash | deepseek/deepseek-flash | deepseek/deepseek-v4-pro |
-| coder_senior | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | deepseek-v4-pro | deepseek-v4-pro | claude-sonnet-4.6-1m | deepseek/deepseek-v4-pro | deepseek/deepseek-v4-pro | anthropic/claude-sonnet-4.6 |
-| reviewer | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | hy3 | deepseek-v4-pro | kimi-k2.7 | opencode/glm-5.3-flash-free | deepseek/deepseek-v4-pro | moonshotai/kimi-k2.7 |
-| reviewer_b | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | hunyuan-2.0-thinking | kimi-k2.7 | deepseek-v4-pro | opencode/deepseek-v4.1-flash-free | moonshotai/kimi-k2.7 | deepseek/deepseek-v4-pro |
-| tester | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | hy3 | kimi-k2.7 | gemini-3.5-flash | opencode/glm-5.3-flash-free | moonshotai/kimi-k2.7 | google/gemini-3.5-flash |
-| recorder | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | hy3 | hy3 | claude-haiku-4.5 | opencode/glm-5.3-flash-free | opencode/glm-5.3-flash-free | anthropic/claude-haiku-4.5 |
-| director | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | claude-opus-4.6-1m | claude-opus-4.7-1m | claude-opus-4.7-1m | anthropic/claude-opus-4.6 | anthropic/claude-opus-4.7 | anthropic/claude-opus-4.7 |
-| goal_evaluator | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | kimi-k2.5 | claude-haiku-4.5 | claude-haiku-4.5 | opencode/deepseek-v4.1-flash-free | anthropic/claude-haiku-4.5 | anthropic/claude-haiku-4.5 |
+| 角色 | claudecode economic | claudecode balanced | claudecode quality | codex economic | codex balanced | codex quality | codebuddy economic | codebuddy balanced | codebuddy quality | opencode economic | opencode balanced | opencode quality |
+|------|------|------|------|------|------|------|------|------|------|------|------|------|
+| architect | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | gpt-5.6-luna | gpt-5.6-terra | gpt-5.6-sol | deepseek-v4-pro | glm-5.2 | claude-opus-4.7-1m | deepseek/deepseek-v4-pro | zhipu/glm-5.2 | anthropic/claude-opus-4.7 |
+| coder_lite | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | gpt-5.6-luna | gpt-5.6-terra | gpt-5.6-sol | hy3 | hy3 | deepseek-v4-flash | opencode/glm-5.3-flash-free | opencode/glm-5.3-flash-free | deepseek/deepseek-flash |
+| coder_standard | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | gpt-5.6-luna | gpt-5.6-terra | gpt-5.6-sol | deepseek-v4-flash | deepseek-v4-flash | deepseek-v4-pro | deepseek/deepseek-flash | deepseek/deepseek-flash | deepseek/deepseek-v4-pro |
+| coder_senior | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | gpt-5.6-luna | gpt-5.6-terra | gpt-5.6-sol | deepseek-v4-pro | deepseek-v4-pro | claude-sonnet-4.6-1m | deepseek/deepseek-v4-pro | deepseek/deepseek-v4-pro | anthropic/claude-sonnet-4.6 |
+| reviewer | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | gpt-5.6-luna | gpt-5.6-terra | gpt-5.6-sol | hy3 | deepseek-v4-pro | kimi-k2.7 | opencode/glm-5.3-flash-free | deepseek/deepseek-v4-pro | moonshotai/kimi-k2.7 |
+| reviewer_b | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | gpt-5.6-luna | gpt-5.6-terra | gpt-5.6-sol | hunyuan-2.0-thinking | kimi-k2.7 | deepseek-v4-pro | opencode/deepseek-v4.1-flash-free | moonshotai/kimi-k2.7 | deepseek/deepseek-v4-pro |
+| tester | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | gpt-5.6-luna | gpt-5.6-terra | gpt-5.6-sol | hy3 | kimi-k2.7 | gemini-3.5-flash | opencode/glm-5.3-flash-free | moonshotai/kimi-k2.7 | google/gemini-3.5-flash |
+| recorder | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | gpt-5.6-luna | gpt-5.6-terra | gpt-5.6-sol | hy3 | hy3 | claude-haiku-4.5 | opencode/glm-5.3-flash-free | opencode/glm-5.3-flash-free | anthropic/claude-haiku-4.5 |
+| director | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | gpt-5.6-luna | gpt-5.6-terra | gpt-5.6-sol | claude-opus-4.6-1m | claude-opus-4.7-1m | claude-opus-4.7-1m | anthropic/claude-opus-4.6 | anthropic/claude-opus-4.7 | anthropic/claude-opus-4.7 |
+| goal_evaluator | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | gpt-5.6-luna | gpt-5.6-terra | gpt-5.6-sol | kimi-k2.5 | claude-haiku-4.5 | claude-haiku-4.5 | opencode/deepseek-v4.1-flash-free | anthropic/claude-haiku-4.5 | anthropic/claude-haiku-4.5 |
 
 ## 平台说明
 

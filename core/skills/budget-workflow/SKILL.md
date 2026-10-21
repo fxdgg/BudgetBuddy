@@ -52,6 +52,8 @@ description: 多Agent研发工作流编排。当用户发起开发类需求时�
 })
 ```
 
+> **Codex 平台注记**：Codex 平台的调用形态见 `budget-workflow/codex-runtime.md`（spawn_agent 组装）。
+
 **🔧 工具发现提示**：
 
 部分客户端版本提供延迟加载的编排类工具。工具搜索返回的是这些编排类工具，**不包含 {{TASK_TOOL}} 工具本身**——因为 {{TASK_TOOL}} 工具是直接可用的内建工具，不需要通过工具搜索发现。

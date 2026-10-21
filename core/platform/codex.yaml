@@ -1,0 +1,42 @@
+# Codex 平台映射 DSL（add-codex-platform design D1，build.py 为唯一消费者）。
+platform: codex
+output: dist/codex
+routing:
+  agent:   "skills/budget-workflow/agents/{name}.md"             # 角色素材平移（非子代理定义，无 model 烘焙）
+  command: "skills/budget-workflow/commands/{group}-{name}.md"   # 命令并入 skill 参考文档（Codex prompts 已弃用）
+  skill:   "skills/{skill}/"
+  rule:    "AGENTS.fragment.md"                                  # 轻量索引（extra_outputs rules_index，全文不进 fragment）
+  hook:    ""                                                    # Codex hooks 实验态，不分发
+  models:  "budget-models.json"
+  personas: "personas.json"
+  lib:     "lib/"
+  setup:   "setup.sh"
+  docs:                                                          # 显式映射：源文件 → 目标路径；null = 不分发
+    MODEL_SELECTION.template.md: "docs/MODEL_SELECTION.md"       # 经 A6 渲染管线输出
+    PERSONAS.md: "docs/PERSONAS.md"
+    architecture.md: "docs/architecture.md"
+    codex-runtime.md: "skills/budget-workflow/codex-runtime.md"  # 派工契约（静态文件经 docs 分发进 skill）
+    opencode-setup-notes.md: null                                # opencode 专属说明，本平台不分发
+agent_frontmatter:
+  emit:
+    name: "{name}"
+    description: "{description}"                                 # 仅元数据（skill 素材形态，模型在 spawn 调用时查表）
+  drop: [model_role, tools, permissions, max_turns, auto_run]
+command_frontmatter:
+  emit: [description]                                            # 命令名由产物文件名承载
+  drop: [name, argument-hint]
+command:
+  invoke: "/budget-start（Codex 以自然语言触发 budget-workflow skill）"
+body_variables:
+  TASK_TOOL: "spawn_agent"                                       # Codex 派发工具（spawn_agent/wait_agent/close_agent 三件套）
+  SKILL_NS: ""
+  AGENT_DIR: ".codex/skills/budget-workflow/agents/（项目级；全局 ~/.codex/skills/…）"
+  GUARD_PATH: "$HOME/.budgetbuddy/projects/<project-name>/memory/coder-guard.json"
+  RULES_DIR: "skills/budget-workflow/rules/（按需读取；AGENTS.md 仅含轻量索引）"
+  PROJECT_DOC: "启动时读取项目根 AGENTS.md（BudgetBuddy 轻量区块）"
+extra_outputs:
+  - kind: rules_index                                            # 轻量索引 + 全文副本（AGENTS.md 32KiB 截断约束）
+    source: "rules/**"
+    dest: "AGENTS.fragment.md"
+    copy_dest: "skills/budget-workflow/rules"
+    markers: ["<!-- BudgetBuddy:begin -->", "<!-- BudgetBuddy:end -->"]

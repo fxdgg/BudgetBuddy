@@ -6,7 +6,7 @@ routing:
   command: "commands/{group}/{name}.md"     # 与 codebuddy 同构 → /budget:start
   skill:   "skills/{skill}/"
   rule:    "CLAUDE.fragment.md"             # 与 extra_outputs dest 一致（同 opencode 模式）
-  hook:    ""                               # 首发降级不分发（同 opencode 先例）
+  hook:    "hooks/budget-notify-hook.py"    # v0.2.1 起分发（三事件通知，注入 .claude/settings.json）
   models:  "budget-models.json"
   personas: "personas.json"
   lib:     "lib/"
@@ -15,6 +15,7 @@ routing:
     MODEL_SELECTION.template.md: "docs/MODEL_SELECTION.md"
     PERSONAS.md: "docs/PERSONAS.md"
     architecture.md: "docs/architecture.md"
+    codex-runtime.md: null                   # codex 专属派工契约，本平台不分发
     opencode-setup-notes.md: null
 agent_frontmatter:
   emit:

@@ -5,19 +5,32 @@ TBD - created by archiving change foundation. Update Purpose after archive.
 ## Requirements
 ### Requirement: 10 个 agent 中立定义齐全
 
-`core/agents/` 恰好包含 10 个中立 agent：architect、coder-lite、coder-standard、coder-senior、reviewer、reviewer-b、tester、recorder、director、goal-evaluator；name/model_role/edit_allow/bash_allow/max_turns 按 design.md §6 角色表逐项一致；正文为中立措辞（含职责、触发时机、协作约定），含模板变量处遵守 §3.3 白名单（design.md §6）。【MUST】
+`core/agents/` 恰好包含 10 个中立 agent：architect、coder-lite、coder-standard、coder-senior、reviewer、reviewer-b、tester、recorder、director、goal-evaluator；name/model_role/edit_allow/bash_allow/max_turns 按 design.md §6 角色表逐项一致；`auto_run` 按角色表对应列：coder-lite/coder-senior/coder-standard/tester 四个执行类 agent 为 `true`，其余 6 个（architect/reviewer/reviewer-b/recorder/director/goal-evaluator）不声明；正文为中立措辞（含职责、触发时机、协作约定），含模板变量处遵守 §3.3 白名单（design.md §6）。【MUST】
 
 #### Scenario: 构建校验角色清单
+
 - **WHEN** build 执行 §3.1 校验
 - **THEN** 10 个文件的 name 恰为角色清单全集（无缺失、无多余）
 
 #### Scenario: 只读 agent 权限落位
+
 - **WHEN** 构建 reviewer/reviewer-b/tester/recorder/director/goal-evaluator
 - **THEN** 其编辑权限按 §6 表映射（reviewer/director/goal-evaluator 只读；recorder 可写 openspec/docs；tester 只读但 bash 全放开；director/goal-evaluator bash 禁止）
 
 #### Scenario: 角色表逐项一致
+
 - **WHEN** reviewer 审计 10 个文件的 frontmatter
 - **THEN** model_role、max_turns 与 §6 表逐行一致（如 director max_turns=15、goal-evaluator=8、architect=80）
+
+#### Scenario: auto_run 默认开启清单
+
+- **WHEN** 审计 10 个文件的 `auto_run` 声明
+- **THEN** 恰为 coder-lite/coder-senior/coder-standard/tester 四个执行类 agent 声明 `true`，其余 6 个不声明（保留逐条人工确认）
+
+#### Scenario: 执行类 agent 产物免审批
+
+- **WHEN** 构建 CodeBuddy 平台后检查 4 个执行类 agent 产物
+- **THEN** 四个产物含 `enabledAutoRun: true`，6 个保留确认 agent 产物不含该键
 
 ### Requirement: 正文职责与协作语义中立化
 

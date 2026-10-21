@@ -8,6 +8,11 @@
 ⑦ 校验失败 dist 保持构建前原样（原子性）；⑧ 空 core 冒烟 exit 0；
 ⑨ agents 存在但 models 缺失 → 产物无 model 字段并告警。
 
+agent-autorun 增量覆盖（design.md D1/D2/D7 + specs/build-pipeline delta）：
+{auto_run} emit 白名单接受与拼写拒绝、rewrite_agent 仅源存在时输出布尔、
+validate_agent auto_run 布尔校验、codebuddy 独有 agents/.bash-patterns.json
+（10 agent bash_allow 与 core/agents 源逐项一致并收入 manifest，其余平台不生成）。
+
 违禁词样本一律运行时字符串拼接构造（tests/ 在扫描范围外，双保险约束）。
 """
 
@@ -343,7 +348,7 @@ class YamlSubsetParserTests(unittest.TestCase):
         self.assertEqual(data['routing']['command'], 'commands/{group}/{name}.md')
         self.assertEqual(data['routing']['skill'], 'skills/{skill}/')
         self.assertEqual(data['routing']['rule'], 'CLAUDE.fragment.md')
-        self.assertEqual(data['routing']['hook'], '')
+        self.assertEqual(data['routing']['hook'], 'hooks/budget-notify-hook.py')
         self.assertIsNone(data['routing']['docs']['opencode-setup-notes.md'])
         self.assertEqual(
             data['routing']['docs']['MODEL_SELECTION.template.md'], 'docs/MODEL_SELECTION.md')
@@ -497,6 +502,34 @@ class EmitWhitelistTests(unittest.TestCase):
         dsl['agent_frontmatter']['emit']['mode'] = 'subagent'
         build.validate_dsl(dsl, 'test.yaml')
 
+    def test_auto_run_expression_accepted(self):
+        """{auto_run}（八表达式之一）被接受：真实 codebuddy.yaml 已映射
+        enabledAutoRun → {auto_run}（design D2），validate_dsl 通过。"""
+        self.assertIn('auto_run', build.EMIT_EXPRESSIONS)
+        dsl = self.load_dsl('codebuddy.yaml')
+        self.assertEqual(
+            dsl['agent_frontmatter']['emit']['enabledAutoRun'], '{auto_run}')
+        self.assertIs(build.validate_dsl(dsl, 'test.yaml'), dsl)
+
+    def test_auto_run_expression_injected_accepted(self):
+        """{auto_run} 注入未映射平台 emit 亦通过（白名单域内合法，映射与否
+        由平台 yaml 自选，build 不强制）。"""
+        for name in ('opencode.yaml', 'claudecode.yaml'):
+            dsl = self.load_dsl(name)
+            dsl['agent_frontmatter']['emit']['enabledAutoRun'] = '{auto_run}'
+            self.assertIs(build.validate_dsl(dsl, 'test.yaml'), dsl)
+
+    def test_auto_run_typo_placeholder_rejected(self):
+        """{auto_run_x}（集合外占位符）→ BuildError（spec Scenario
+        「集合外占位符仍被拒绝」，错误指出合法表达式集合）。"""
+        dsl = self.load_dsl('codebuddy.yaml')
+        dsl['agent_frontmatter']['emit']['enabledAutoRun'] = '{auto_run_x}'
+        with self.assertRaises(build.BuildError) as ctx:
+            build.validate_dsl(dsl, 'test.yaml')
+        self.assertIn('{auto_run_x}', str(ctx.exception))
+        self.assertIn('占位符', str(ctx.exception))
+        self.assertIn('auto_run', str(ctx.exception))
+
 
 class RoutingPlaceholderTests(unittest.TestCase):
     """P2-1 routing 模板占位符域校验：{xxx} 必须 ∈ {name}/{skill}/{group}/{path}。"""
@@ -641,6 +674,21 @@ class FrontmatterValidationTests(unittest.TestCase):
             with self.assertRaises(build.BuildError):
                 build.validate_agent(fm, '正文。', 'architect', 'a.md', None)
 
+    def test_validate_agent_auto_run_non_boolean(self):
+        """auto_run 非布尔（"true"/1/1.5/None）→ BuildError（design D1：
+        可选布尔，拒绝字符串与整数形态，错误指出字段名）。"""
+        for bad in ('true', 1, 1.5, 0, None):
+            fm = dict(self.VALID_FM, auto_run=bad)
+            with self.assertRaises(build.BuildError) as ctx:
+                build.validate_agent(fm, '正文。', 'architect', 'a.md', None)
+            self.assertIn('auto_run', str(ctx.exception))
+
+    def test_validate_agent_auto_run_boolean_ok(self):
+        """auto_run 布尔值（true/false）通过校验（缺省亦合法，见 VALID_FM 基准）。"""
+        for value in (True, False):
+            fm = dict(self.VALID_FM, auto_run=value)
+            build.validate_agent(fm, '正文。', 'architect', 'a.md', None)
+
     def test_validate_agent_empty_body(self):
         with self.assertRaises(build.BuildError) as ctx:
             build.validate_agent(self.VALID_FM, '   \n', 'architect', 'a.md', None)
@@ -768,6 +816,56 @@ class PermissionMappingTests(unittest.TestCase):
         fm = self.make_fm(['*'], ['*'])
         with self.assertRaises(build.BuildError):
             build.rewrite_agent(fm, '\n正文。\n', dsl, 'codebuddy', {}, 'a.md')
+
+    def test_rewrite_agent_auto_run_emitted(self):
+        """源含 auto_run: True → codebuddy 产物含 enabledAutoRun: true
+        （design D1/D2，spec Scenario「{auto_run} 表达式被接受并映射」）。"""
+        dsl = build.parse_yaml(
+            (PLATFORM_YAML_DIR / 'codebuddy.yaml').read_text(encoding='utf-8'))
+        fm = self.make_fm(['*'], ['*'])
+        fm['auto_run'] = True
+        models = {'platforms': {'codebuddy': {'presets': {'balanced': {'architect': 'cb-arch'}}}}}
+        output = build.rewrite_agent(fm, '\n正文。\n', dsl, 'codebuddy', models, 'a.md')
+        self.assertIn('enabledAutoRun: true\n', output)
+        # 既有 emit 键不受影响（回归）。
+        self.assertIn('permissionMode: acceptEdits\n', output)
+
+    def test_rewrite_agent_auto_run_absent_omitted(self):
+        """源缺省 auto_run → 产物不含 enabledAutoRun 键（不输出 false 字面量，
+        spec Scenario「源缺省时产物键不出现」）。"""
+        dsl = build.parse_yaml(
+            (PLATFORM_YAML_DIR / 'codebuddy.yaml').read_text(encoding='utf-8'))
+        fm = self.make_fm(['*'], ['*'])
+        models = {'platforms': {'codebuddy': {'presets': {'balanced': {'architect': 'cb-arch'}}}}}
+        output = build.rewrite_agent(fm, '\n正文。\n', dsl, 'codebuddy', models, 'a.md')
+        self.assertNotIn('enabledAutoRun', output)
+        self.assertNotIn('auto_run', output)
+
+    def test_rewrite_agent_auto_run_false_emitted(self):
+        """源显式 auto_run: False → 产物含 enabledAutoRun: false（布尔直出，
+        _dump_scalar 既有 bool 渲染能力，序列化层零改动）。"""
+        dsl = build.parse_yaml(
+            (PLATFORM_YAML_DIR / 'codebuddy.yaml').read_text(encoding='utf-8'))
+        fm = self.make_fm(['*'], ['*'])
+        fm['auto_run'] = False
+        models = {'platforms': {'codebuddy': {'presets': {'balanced': {'architect': 'cb-arch'}}}}}
+        output = build.rewrite_agent(fm, '\n正文。\n', dsl, 'codebuddy', models, 'a.md')
+        self.assertIn('enabledAutoRun: false\n', output)
+
+    def test_rewrite_agent_auto_run_not_mapped_other_platforms(self):
+        """opencode/claudecode 不映射 {auto_run}：即使源声明也不产出该键
+        （design D2 不映射降级，spec Scenario「既有 emit 表达式行为不变」）。"""
+        for name in ('opencode.yaml', 'claudecode.yaml'):
+            platform = name.split('.')[0]
+            dsl = build.parse_yaml(
+                (PLATFORM_YAML_DIR / name).read_text(encoding='utf-8'))
+            fm = self.make_fm(['*'], ['*'])
+            fm['auto_run'] = True
+            models = {'platforms': {platform: {'presets': {
+                'balanced': {'architect': 'cb-arch'}}}}}
+            output = build.rewrite_agent(fm, '\n正文。\n', dsl, platform, models, 'a.md')
+            self.assertNotIn('enabledAutoRun', output, platform)
+            self.assertNotIn('auto_run', output, platform)
 
     def test_rewrite_command_codebuddy(self):
         """命令映射：CodeBuddy 三字段直出。"""
@@ -1482,6 +1580,91 @@ class BuildPipelineTests(unittest.TestCase):
         self.assertIn('core/agents/broken.md', proc.stderr)
 
 
+class AgentBashPatternsTests(unittest.TestCase):
+    """D7 免审批 bash 模式数据文件：仅映射 {auto_run} 的平台生成。
+
+    临时仓库复制真实 core/agents/*.md 中立源（非 AGENT_TABLE 镜像），
+    端到端断言：codebuddy 产物含 agents/.bash-patterns.json，10 agent
+    全集且 bash_allow 与 core/agents/*.md 源逐项一致、收入 manifest；
+    opencode/claudecode 门控不命中故不生成（产物零变化）。
+    """
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.core = self.root / 'core'
+        for name in ('codebuddy.yaml', 'opencode.yaml', 'claudecode.yaml'):
+            dest = self.core / 'platform' / name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(PLATFORM_YAML_DIR / name, dest)
+        for category in ('agents', 'skills', 'commands', 'rules',
+                         'models', 'personas', 'lib', 'docs', 'hooks'):
+            (self.core / category).mkdir(parents=True, exist_ok=True)
+        # 真实中立源（含 4 个执行类 agent 的 auto_run: true 声明）。
+        for src in sorted((REPO_ROOT / 'core' / 'agents').glob('*.md')):
+            shutil.copyfile(src, self.core / 'agents' / src.name)
+        write_full_models(self.root)
+
+    def build_all(self):
+        """运行构建并要求 exit 0。"""
+        proc = run_build(self.root)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc
+
+    @staticmethod
+    def expected_from_sources():
+        """从真实 core/agents/*.md 源计算期望 {agent-name: bash_allow}。"""
+        expected = {}
+        for src in sorted((REPO_ROOT / 'core' / 'agents').glob('*.md')):
+            rel = f'core/agents/{src.name}'
+            fm, _ = build.load_frontmatter(src.read_text(encoding='utf-8'), rel)
+            _, bash_allow = build._permission_lists(fm, rel)  # pylint: disable=protected-access
+            expected[fm['name']] = bash_allow
+        return expected
+
+    def test_codebuddy_generates_bash_patterns_from_sources(self):
+        """codebuddy：agents/.bash-patterns.json 存在，10 agent 全集、
+        bash_allow 与 core/agents/*.md 源逐项一致，收入 manifest（spec
+        Scenario「codebuddy 构建生成数据文件」）。"""
+        self.build_all()
+        data_file = self.root / 'dist' / 'codebuddy' / 'agents' / '.bash-patterns.json'
+        self.assertTrue(data_file.is_file())
+        text = data_file.read_text(encoding='utf-8')
+        data = json.loads(text)
+        self.assertEqual(set(data), {'agents'})
+        expected = self.expected_from_sources()
+        self.assertEqual(len(expected), 10)
+        self.assertEqual(
+            {name: item['bash_allow'] for name, item in data['agents'].items()},
+            expected)
+        # 任务指定抽查值（design D7 / spec Scenario 示例）。
+        self.assertEqual(data['agents']['coder-lite']['bash_allow'], ['*'])
+        self.assertEqual(
+            data['agents']['architect']['bash_allow'], ['git *', 'openspec *'])
+        self.assertEqual(data['agents']['director']['bash_allow'], [])
+        # 序列化形态：键排序、indent 2、末尾换行（与 .manifest.json 同风格）。
+        self.assertTrue(text.endswith('\n'))
+        self.assertEqual(
+            text, json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False) + '\n')
+        # 收入 manifest 且摘要一致（gen_manifest rglob 收录点文件）。
+        manifest = json.loads(
+            (self.root / 'dist' / 'codebuddy' / '.manifest.json').read_text(
+                encoding='utf-8'))
+        self.assertIn('agents/.bash-patterns.json', manifest['files'])
+        self.assertEqual(
+            manifest['files']['agents/.bash-patterns.json'],
+            hashlib.sha256(data_file.read_bytes()).hexdigest())
+
+    def test_other_platforms_do_not_generate_bash_patterns(self):
+        """opencode/claudecode 不映射 {auto_run}：门控不命中，产物树不含
+        数据文件（spec Scenario「未映射平台不生成数据文件」）。"""
+        self.build_all()
+        for platform in ('opencode', 'claudecode'):
+            dist_dir = self.root / 'dist' / platform
+            self.assertEqual(list(dist_dir.rglob('.bash-patterns.json')), [], platform)
+
+
 class ClaudecodeBuildTests(unittest.TestCase):
     """claudecode 平台构建产物（specs/claudecode-platform 各 Scenario）。
 
@@ -1517,7 +1700,7 @@ class ClaudecodeBuildTests(unittest.TestCase):
                         'argument-hint: "<需求描述>"\n---\n使用 {{TASK_TOOL}} 启动。\n')
         self.write_file('core/commands/opsx/apply.md',
                         '---\nname: "Opsx: Apply"\ndescription: 应用变更。\n---\n正文。\n')
-        # hooks（仅 codebuddy 分发；claudecode 空串降级不分发）。
+        # hooks（codebuddy/claudecode 分发；opencode 空串降级不分发）。
         self.write_file('core/hooks/budget-notify-hook.py', '#!/usr/bin/env python3\n')
 
     def write_file(self, relpath, text):
@@ -1596,12 +1779,13 @@ class ClaudecodeBuildTests(unittest.TestCase):
         self.assertTrue(
             (self.root / 'dist' / 'claudecode' / 'commands' / 'opsx' / 'apply.md').is_file())
 
-    def test_hooks_not_distributed(self):
-        """hooks 降级：routing.hook 空串 → dist/claudecode 无 hooks 文件，
-        构建不因 core/hooks 有文件而失败（走既有告警路径）。"""
+    def test_hooks_distributed(self):
+        """hooks 分发（v0.2.1 起）：routing.hook 非空 → dist/claudecode/
+        hooks/budget-notify-hook.py 存在且无「不分发」告警（opencode 仍降级）。"""
         proc = self.build_all()
-        self.assertFalse((self.root / 'dist' / 'claudecode' / 'hooks').exists())
-        self.assertIn('hooks', proc.stderr)
+        self.assertTrue(
+            (self.root / 'dist' / 'claudecode' / 'hooks' / 'budget-notify-hook.py').is_file())
+        self.assertIn('hooks', proc.stderr)  # opencode 空串降级告警仍在
 
     def test_repeated_build_three_platforms_stable(self):
         """泛化回归：三平台连续两次构建，manifest 与产物树逐字节一致。"""

@@ -5,7 +5,9 @@
 覆盖：注入（三事件 + superpowers、用户已有 hooks 保留、键序保持、备份
 生成与跳过重备份、幂等重入）、移除（本套件项精确删除、用户项保留、
 空文件删除）、解析失败不写回、查询状态、hooks.sh 编排链路端到端
-（bash 子进程，含 do_notify 转发与 do_status 冒烟）。
+（bash 子进程，含 do_notify 转发与 do_status 冒烟）、HOOK_EVENTS_JSON
+事件集参数化（默认清单不变/自定义清单注入/非法清单不写回/清单幂等与
+marker 驱动移除）。
 """
 
 import json
@@ -35,6 +37,8 @@ def run_engine(action: str, settings_file: Path, hook_cmd: str = HOOK_CMD,
     """以环境变量传参驱动注入引擎子进程。"""
     env = dict(os.environ)
     env.pop('SETTINGS_FILE', None)
+    # 事件清单仅由用例显式传入（extra_env），防外层会话变量泄漏干扰默认清单用例
+    env.pop('HOOK_EVENTS_JSON', None)
     env['SETTINGS_FILE'] = str(settings_file)
     env['ACTION'] = action
     env['HOOK_CMD'] = hook_cmd
@@ -340,6 +344,152 @@ class FailureModeTests(EngineTestCase):
             capture_output=True, text=True, encoding='utf-8', check=False, timeout=30)
         self.assertEqual(proc.returncode, 1)
         self.assertIn('SETTINGS_FILE', proc.stderr)
+
+
+class EventManifestTests(EngineTestCase):
+    """HOOK_EVENTS_JSON 事件集参数化（design.md D2）。
+
+    默认清单（未传）结构不变、自定义清单注入条目形态、非法清单多形态
+    报错不写回、清单注入幂等、remove 的 marker 驱动清理（不消费清单）。
+    """
+
+    # 自定义清单：两事件——一空 matcher（无 matcher 条目形态）、一带 matcher
+    CUSTOM_MANIFEST = json.dumps([
+        {'event': 'PermissionRequest', 'matchers': []},
+        {'event': 'Notification', 'matchers': ['permission_prompt']},
+    ])
+
+    def test_no_env_uses_default_manifest(self):
+        """未传 HOOK_EVENTS_JSON → 默认三事件结构不变（codebuddy 行为不变）。"""
+        self.write_settings({'theme': 'dark'})
+        proc = run_engine('inject_hooks', self.settings)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn('injected', proc.stdout)
+        data = self.read_settings()
+        self.assertEqual(set(data['hooks']),
+                         {'Notification', 'PreToolUse', 'SubagentStop'})
+        self.assertEqual(
+            [m.get('matcher') for m in data['hooks']['Notification']],
+            ['permission_prompt', 'idle_prompt'])
+        self.assertEqual(
+            [m.get('matcher') for m in data['hooks']['PreToolUse']], ['Bash'])
+        self.assertNotIn('matcher', data['hooks']['SubagentStop'][0])
+        self.assertEqual(len(self.suite_hook_commands(data)), 4)
+        self.assertNotIn('enabledPlugins', data)
+
+    def test_custom_manifest_injects_declared_events(self):
+        """自定义清单：仅注入清单事件（空 matcher → 无 matcher 条目），条目形态完整。"""
+        self.write_settings({'theme': 'dark'})
+        proc = run_engine('inject_hooks', self.settings,
+                          extra_env={'HOOK_EVENTS_JSON': self.CUSTOM_MANIFEST})
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn('injected', proc.stdout)
+        data = self.read_settings()
+        # 未列入清单的默认事件（PreToolUse/SubagentStop）不注入
+        self.assertEqual(set(data['hooks']), {'Notification', 'PermissionRequest'})
+        notification = data['hooks']['Notification']
+        self.assertEqual(len(notification), 1)
+        self.assertEqual(notification[0]['matcher'], 'permission_prompt')
+        self.assertEqual(notification[0]['hooks'],
+                         [{'type': 'command', 'command': HOOK_CMD, 'timeout': 10}])
+        permission = data['hooks']['PermissionRequest']
+        self.assertEqual(len(permission), 1)
+        self.assertNotIn('matcher', permission[0])
+        self.assertEqual(permission[0]['hooks'],
+                         [{'type': 'command', 'command': HOOK_CMD, 'timeout': 10}])
+        # inject_hooks 不动 enabledPlugins；注入前备份已生成
+        self.assertNotIn('enabledPlugins', data)
+        self.assertTrue(Path(str(self.settings) + '.bak-budget').is_file())
+
+    def test_inject_all_consumes_custom_manifest(self):
+        """inject_all 同样消费清单：superpowers + 清单事件（无默认事件）。"""
+        proc = run_engine('inject_all', self.settings,
+                          extra_env={'HOOK_EVENTS_JSON': self.CUSTOM_MANIFEST})
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn('injected', proc.stdout)
+        data = self.read_settings()
+        self.assertTrue(data['enabledPlugins'][SUPERPOWERS_KEY])
+        self.assertEqual(set(data['hooks']), {'Notification', 'PermissionRequest'})
+
+    def test_custom_manifest_invalid_forms_reject_without_writeback(self):
+        """非法清单多形态 → exit 1 + stderr 报错，原文件一字不动、无备份。"""
+        original = json.dumps({'theme': 'dark'}, indent=2)
+        self.settings.write_text(original, encoding='utf-8')
+        invalid_forms = (
+            'not-json {',                                 # JSON 语法错
+            '{"event": "Notification", "matchers": []}',  # 顶层非数组
+            '["x"]',                                      # 条目非对象
+            '[{"matchers": []}]',                         # 条目缺 event
+            '[{"event": "X", "matchers": "Bash"}]',       # matchers 非数组
+            '[{"event": "X", "matchers": [1]}]',          # matchers 元素非字符串
+            '[{"event": "", "matchers": []}]',            # event 空字符串
+        )
+        for form in invalid_forms:
+            with self.subTest(form=form):
+                proc = run_engine('inject_hooks', self.settings,
+                                  extra_env={'HOOK_EVENTS_JSON': form})
+                self.assertEqual(proc.returncode, 1)
+                self.assertIn('HOOK_EVENTS_JSON', proc.stderr)
+                self.assertEqual(self.settings.read_text(encoding='utf-8'), original)
+                self.assertFalse(
+                    Path(str(self.settings) + '.bak-budget').exists())
+
+    def test_invalid_manifest_missing_settings_file_not_created(self):
+        """清单校验先于 settings 读取：文件不存在时非法清单不创建文件。"""
+        proc = run_engine('inject_hooks', self.settings,
+                          extra_env={'HOOK_EVENTS_JSON': 'broken'})
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn('HOOK_EVENTS_JSON', proc.stderr)
+        self.assertFalse(self.settings.exists())
+
+    def test_custom_manifest_idempotent_reinject(self):
+        """同清单重跑 → no_change，条目不重复。"""
+        run_engine('inject_hooks', self.settings,
+                   extra_env={'HOOK_EVENTS_JSON': self.CUSTOM_MANIFEST})
+        proc = run_engine('inject_hooks', self.settings,
+                          extra_env={'HOOK_EVENTS_JSON': self.CUSTOM_MANIFEST})
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn('no_change', proc.stdout)
+        data = self.read_settings()
+        self.assertEqual(len(self.suite_hook_commands(data)), 2)
+        self.assertEqual(len(data['hooks']['Notification']), 1)
+
+    def test_custom_then_default_manifest_accumulates_events(self):
+        """事件级幂等：先自定义后默认 → 默认清单仅补未注入事件（已注入事件整事件跳过）。"""
+        run_engine('inject_hooks', self.settings,
+                   extra_env={'HOOK_EVENTS_JSON': self.CUSTOM_MANIFEST})
+        proc = run_engine('inject_hooks', self.settings)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn('injected', proc.stdout)
+        data = self.read_settings()
+        # Notification 已有套件条目 → 默认清单跳过该事件（不展开其 matcher）；
+        # 仅补 PreToolUse/SubagentStop
+        self.assertEqual(set(data['hooks']),
+                         {'Notification', 'PermissionRequest', 'PreToolUse', 'SubagentStop'})
+        self.assertEqual(len(self.suite_hook_commands(data)), 4)
+        self.assertEqual(len(data['hooks']['Notification']), 1)
+
+    def test_remove_after_custom_manifest_ignores_manifest_and_keeps_user_hooks(self):
+        """remove 为 marker 驱动：不消费 HOOK_EVENTS_JSON，第三方 hooks 保留。"""
+        self.write_settings({'hooks': {'PermissionRequest': [
+            {'matcher': '*', 'hooks': [
+                {'type': 'command', 'command': 'echo third-party'},
+                {'type': 'command', 'command': HOOK_CMD},
+            ]},
+        ]}})
+        run_engine('inject_hooks', self.settings,
+                   extra_env={'HOOK_EVENTS_JSON': self.CUSTOM_MANIFEST})
+        # remove 时传入另一份清单：移除仍按 marker 全事件扫描（不消费该变量）
+        other_manifest = json.dumps([{'event': 'Whatever', 'matchers': ['x']}])
+        proc = run_engine('remove_hooks', self.settings,
+                          extra_env={'HOOK_EVENTS_JSON': other_manifest})
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn('removed', proc.stdout)
+        data = self.read_settings()
+        self.assertEqual(self.suite_hook_commands(data), [])
+        matcher = data['hooks']['PermissionRequest'][0]
+        self.assertEqual([h.get('command') for h in matcher['hooks']],
+                         ['echo third-party'])
 
 
 class QueryTests(EngineTestCase):

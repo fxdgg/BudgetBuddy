@@ -1,5 +1,5 @@
 #!/bin/bash
-# BudgetBuddy install.sh — 三平台安装器（CodeBuddy + OpenCode + Claude Code）
+# BudgetBuddy install.sh — 四平台安装器（CodeBuddy + OpenCode + Claude Code + Codex）
 # 依据: design.md §10 / §12-A3/A7/A9/A12 / specs/installer/spec.md
 #
 # 用法:
@@ -27,7 +27,7 @@ BUDGET_REPO_URL="${BUDGET_REPO_URL:-https://github.com/fxdgg/BudgetBuddy}"
 BUDGET_VERSION="${BUDGET_VERSION:-}"
 
 # ─── 全局状态 ──────────────────────────────────────────────────────────────
-BUDGET_INSTALL_PLATFORM="codebuddy"   # codebuddy | opencode | claudecode | both | all
+BUDGET_INSTALL_PLATFORM="codebuddy"   # codebuddy | opencode | claudecode | codex | both | all
 BUDGET_INSTALL_GLOBAL=0               # 1=全局
 BUDGET_SCOPE_EXPLICIT=0               # BUDGET_GLOBAL 环境变量已显式设置
 BUDGET_PYTHON="${BUDGET_PYTHON:-}"
@@ -72,15 +72,15 @@ show_help() {
   --help       显示此帮助信息
 
 安装模式:
-  无参数       交互式选择平台（CodeBuddy / OpenCode / Claude Code / 全部）与作用域（项目/全局）
+  无参数       交互式选择平台（CodeBuddy / OpenCode / Claude Code / Codex / 全部）与作用域（项目/全局）
   --global     直接全局安装（所有项目共享）
   纯非交互     BUDGET_PLATFORM + BUDGET_GLOBAL 环境变量（CI / 脚本调用）
 
 环境变量（BUDGET_* 前缀）:
   BUDGET_REPO_URL   下载源（默认 GitHub raw 占位地址，可指向自建镜像）
   BUDGET_VERSION    指定版本 tag（默认经 releases/latest 发现最新版）
-  BUDGET_PLATFORM   codebuddy | opencode | claudecode | both | all（跳过平台交互）
-                    all = 三平台全部安装（推荐）；both = codebuddy+opencode（历史兼容值）
+  BUDGET_PLATFORM   codebuddy | opencode | claudecode | codex | both | all（跳过平台交互）
+                    all = 四平台全部安装（推荐）；both = codebuddy+opencode（历史兼容值）
   BUDGET_GLOBAL     0=项目安装 / 1=全局安装（设置即跳过作用域交互）
 
 安装落点:
@@ -92,6 +92,11 @@ show_help() {
   Claude Code 项目 → .claude/            全局 → ~/.claude/
              + 管理面统一 ~/.budgetbuddy/（与 OpenCode 共享）
              + CLAUDE.fragment.md 幂等合并进 CLAUDE.md
+             + hooks 注入 settings.json（三事件通知）
+  Codex      项目 → .codex/skills/       全局 → ~/.codex/skills/
+             + 管理面统一 ~/.budgetbuddy/（与其他平台共享）
+             + AGENTS.fragment.md 轻量区块合并进项目根 / ~/.codex/AGENTS.md
+             + config.toml 注入 [features] multi_agent = true（spawn 工具前提）
 EOF
 }
 
@@ -159,7 +164,7 @@ check_dependencies() {
 select_platform() {
     # BUDGET_PLATFORM 显式指定 → 纯非交互；非法值忽略并警告
     case "${BUDGET_PLATFORM:-}" in
-        codebuddy|opencode|claudecode|both|all)
+        codebuddy|opencode|claudecode|codex|both|all)
             BUDGET_INSTALL_PLATFORM="$BUDGET_PLATFORM"
             return 0
             ;;
@@ -173,17 +178,19 @@ select_platform() {
     echo -e "${CYAN}请选择安装平台:${NC}"
     echo "  1) CodeBuddy   — agents/commands/skills/rules/hooks → .codebuddy/（或 ~/.codebuddy/）"
     echo "  2) OpenCode    — agent/command/skill → opencode 目录 + 管理面 ~/.budgetbuddy/"
-    echo "  3) Claude Code — agents/commands/skills → .claude/（或 ~/.claude/）+ 管理面 ~/.budgetbuddy/"
-    echo "  4) 全部        — 依次执行 CodeBuddy、OpenCode 与 Claude Code 安装"
+    echo "  3) Claude Code — agents/commands/skills/hooks → .claude/（或 ~/.claude/）+ 管理面 ~/.budgetbuddy/"
+    echo "  4) Codex       — skills → .codex/skills/（或 ~/.codex/skills/）+ 管理面 ~/.budgetbuddy/ + config.toml multi_agent 注入"
+    echo "  5) 全部        — 依次执行 CodeBuddy、OpenCode、Claude Code 与 Codex 安装"
     echo ""
-    echo -n "请输入 (1/2/3/4，默认 1): "
+    echo -n "请输入 (1/2/3/4/5，默认 1): "
     local choice=""
     # 交互从 /dev/tty 读取（curl|bash 管道安装也支持）；无 tty 走默认
     if read -r choice < /dev/tty 2>/dev/null; then
         case "$choice" in
             2) BUDGET_INSTALL_PLATFORM="opencode" ;;
             3) BUDGET_INSTALL_PLATFORM="claudecode" ;;
-            4) BUDGET_INSTALL_PLATFORM="all" ;;
+            4) BUDGET_INSTALL_PLATFORM="codex" ;;
+            5) BUDGET_INSTALL_PLATFORM="all" ;;
             *) BUDGET_INSTALL_PLATFORM="codebuddy" ;;
         esac
     else
@@ -293,6 +300,7 @@ resolve_source() {
         codebuddy)  [[ -n "$script_dir" && -f "$script_dir/dist/codebuddy/.manifest.json" ]] || local_ok=false ;;
         opencode)   [[ -n "$script_dir" && -f "$script_dir/dist/opencode/.manifest.json" ]] || local_ok=false ;;
         claudecode) [[ -n "$script_dir" && -f "$script_dir/dist/claudecode/.manifest.json" ]] || local_ok=false ;;
+        codex)      [[ -n "$script_dir" && -f "$script_dir/dist/codex/.manifest.json" ]] || local_ok=false ;;
         both)
             [[ -n "$script_dir" && -f "$script_dir/dist/codebuddy/.manifest.json" ]] || local_ok=false
             [[ -n "$script_dir" && -f "$script_dir/dist/opencode/.manifest.json" ]] || local_ok=false
@@ -301,6 +309,7 @@ resolve_source() {
             [[ -n "$script_dir" && -f "$script_dir/dist/codebuddy/.manifest.json" ]] || local_ok=false
             [[ -n "$script_dir" && -f "$script_dir/dist/opencode/.manifest.json" ]] || local_ok=false
             [[ -n "$script_dir" && -f "$script_dir/dist/claudecode/.manifest.json" ]] || local_ok=false
+            [[ -n "$script_dir" && -f "$script_dir/dist/codex/.manifest.json" ]] || local_ok=false
             ;;
     esac
     if [[ "$local_ok" == "true" ]]; then
@@ -356,7 +365,8 @@ sync_manifest_tree() {
     # 用法: sync_manifest_tree <dist_root> <manifest_file> <dest_root> <filter> [struct_prefixes]
     #   filter: all（全部条目）| struct（平台结构前缀）| mgmt（其余）
     #   struct_prefixes: 平台结构目录前缀（空格分隔；默认 "agent command skill"
-    #   单数 = opencode 形态；claudecode 传 "agents commands skills" 复数）
+    #   单数 = opencode 形态；claudecode 传 "agents commands skills hooks"
+    #   复数 + hooks；最多支持 4 个前缀）
     # 增量同步（specs/installer「manifest 增量同步」）:
     #   目标哈希与清单一致 → 跳过；不一致 → 覆盖；目标不存在 → 复制；
     #   清单外文件不枚举（一律保留）。统计入 SYNC_ADDED/UPDATED/SKIPPED。
@@ -365,8 +375,8 @@ sync_manifest_tree() {
     local dest_root="$3"
     local filter="$4"
     local struct_prefixes="${5:-agent command skill}"
-    local sp1="" sp2="" sp3=""
-    read -r sp1 sp2 sp3 <<< "$struct_prefixes" || true
+    local sp1="" sp2="" sp3="" sp4=""
+    read -r sp1 sp2 sp3 sp4 <<< "$struct_prefixes" || true
     local list_file=""
     list_file="$(mktemp 2>/dev/null || mktemp -t budget-sync)" || print_error "临时文件创建失败"
     if ! manifest_lines "$manifest_file" > "$list_file"; then
@@ -384,7 +394,8 @@ sync_manifest_tree() {
                 kind="mgmt"
                 if [[ -n "$sp1" && "$rel" == "$sp1"/* ]] \
                     || [[ -n "$sp2" && "$rel" == "$sp2"/* ]] \
-                    || [[ -n "$sp3" && "$rel" == "$sp3"/* ]]; then
+                    || [[ -n "$sp3" && "$rel" == "$sp3"/* ]] \
+                    || [[ -n "$sp4" && "$rel" == "$sp4"/* ]]; then
                     kind="struct"
                 fi
                 ;;
@@ -520,11 +531,12 @@ write_local_manifest() {
     #   mode: all        → files = 全部条目（codebuddy；排除 AGENTS.fragment.md）
     #         opencode   → files = 管理面条目 + platform_files = 平台结构条目（无前缀）
     #         claudecode → 同构拆分，platform_files 条目带 "claudecode:" 前缀
+    #         codex      → 同构拆分，platform_files 条目带 "codex:" 前缀
     # platform_files 平铺带平台前缀命名空间（辅审 M4 合并写）：opencode 条目
-    # 保持历史无前缀格式（单装产物字节级不变），claudecode 条目带
-    # "claudecode:" 前缀；两模式均合并写——保留其他平台条目（后装不覆盖
-    # 先装），仅写入/更新本平台段。claudecode 的 files 段亦合并写（管理面
-    # 与 opencode 共享 ~/.budgetbuddy/，两平台管理面产物存在差异文件，如
+    # 保持历史无前缀格式（单装产物字节级不变），claudecode/codex 条目带
+    # "claudecode:"/"codex:" 前缀；各模式均合并写——保留其他平台条目（后装
+    # 不覆盖先装），仅写入/更新本平台段。claudecode/codex 的 files 段亦合并写
+    # （管理面与 opencode 共享 ~/.budgetbuddy/，两平台管理面产物存在差异文件，如
     # opencode 独有 docs/setup-notes.md——保留他平台条目，仅延续磁盘仍存
     # 在者）；opencode 的 files 段保持整段覆盖（历史行为不变）。
     # 本地清单格式与 lib/uninstall.sh 读取约定一致（{"files": {<相对路径>: <sha256>}}，
@@ -567,19 +579,26 @@ def is_struct(rel, prefixes):
 
 
 mode = os.environ['BUDGET_MODE']
-if mode in ('opencode', 'claudecode'):
+if mode in ('opencode', 'claudecode', 'codex'):
     if mode == 'opencode':
         prefixes = ('agent', 'command', 'skill')
         own_ns = ''                # opencode 历史格式：无前缀（单装字节级不变）
 
         def is_own(key):
             return ':' not in key  # 本平台段 = 无冒号键；带前缀键属其他平台
-    else:
-        prefixes = ('agents', 'commands', 'skills')
+    elif mode == 'claudecode':
+        prefixes = ('agents', 'commands', 'skills', 'hooks')
         own_ns = 'claudecode:'
 
         def is_own(key):
             return key.startswith(own_ns)  # 本平台段 = claudecode: 前缀键
+    else:
+        # codex：结构前缀仅 skills/（dist/codex 平台结构 = skills 树，design D1）
+        prefixes = ('skills',)
+        own_ns = 'codex:'
+
+        def is_own(key):
+            return key.startswith(own_ns)  # 本平台段 = codex: 前缀键
     files = {}
     platform_files = {}
     raw_pf = existing.get('platform_files')
@@ -594,7 +613,7 @@ if mode in ('opencode', 'claudecode'):
             platform_files[own_ns + rel] = sha
         else:
             files[rel] = sha
-    if mode == 'claudecode':
+    if mode in ('claudecode', 'codex'):
         # files 合并写：保留其他平台管理面条目（仅延续磁盘仍存在者——
         # 差集清理已删除的陈旧条目不延续）
         old_files = existing.get('files')
@@ -754,6 +773,175 @@ PYEOF
     esac
 }
 
+# ─── codex config.toml multi_agent 注入（design.md D4 / add-codex-platform D4）──
+inject_codex_config() {
+    # 用法: inject_codex_config <config_file>
+    # 目标 .codex/config.toml（项目）或 ~/.codex/config.toml（全局）——文本级
+    # 四态幂等注入 [features] 段 multi_agent = true（spawn_agent/wait_agent/
+    # close_agent 工具启用前提）：
+    #   ① 段内已有 multi_agent = true（容忍 = 两侧空格变体）→ 跳过（零写入）
+    #   ② 段内 multi_agent 键值非 true（用户显式关闭）→ 尊重用户配置不写入，
+    #      告警 spawn 工具不可用
+    #   ③ 段存在缺键 → 段末追加 multi_agent = true（用户其他键零触碰）
+    #   ④ 无 [features] 段 → 文末追加段
+    # 段头行首精确匹配 ^\[features\]$（容忍行尾注释，防 [features.xxx] 子串
+    # 误判）；注入前备份 <config>.bak-budget（config 不存在则无备份——同
+    # settings.json 先例：备份内容与当前一致跳过、当前已含本套件痕迹不覆盖
+    # 原始恢复点）；原子写（临时文件 + rename）。失败降级警告不阻断安装。
+    # 结果写入全局 CODEX_CONFIG_RESULT（injected|created|exists|respected|
+    # failed）供安装摘要如实呈现。
+    local config_file="$1"
+    CODEX_CONFIG_RESULT="failed"
+    local status=""
+    status="$(BUDGET_CONFIG_FILE="$config_file" "$BUDGET_PYTHON" << 'PYEOF'
+import os
+import re
+import sys
+import tempfile
+
+SECTION_RE = re.compile(r'^\[features\][ \t]*(?:#.*)?$')
+SECTION_ANY_RE = re.compile(r'^\[')
+KEY_TRUE_RE = re.compile(r'^multi_agent\s*=\s*true\s*$')
+KEY_ANY_RE = re.compile(r'^multi_agent\s*=')
+
+path = os.environ['BUDGET_CONFIG_FILE']
+content = ''
+if os.path.isfile(path):
+    try:
+        with open(path, encoding='utf-8') as handle:
+            content = handle.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        print('config.toml 读取失败: %s' % exc, file=sys.stderr)
+        sys.exit(1)
+
+lines = content.split('\n')
+
+
+def atomic_write(target, text):
+    dir_name = os.path.dirname(target) or '.'
+    fd, tmp_path = tempfile.mkstemp(prefix='.codex-config-', suffix='.tmp',
+                                    dir=dir_name)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as tmp:
+            tmp.write(text)
+        os.replace(tmp_path, target)
+    except Exception as exc:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        print('config.toml 写入失败: %s' % exc, file=sys.stderr)
+        sys.exit(1)
+
+
+def backup_original():
+    # settings.json 先例语义：文件不存在无备份；备份与当前一致跳过；
+    # 当前已含本套件痕迹（multi_agent 键）不覆盖原始恢复点
+    if not os.path.isfile(path):
+        return
+    backup = path + '.bak-budget'
+    if os.path.isfile(backup):
+        try:
+            with open(backup, encoding='utf-8') as handle:
+                if handle.read() == content:
+                    return
+        except (OSError, UnicodeDecodeError):
+            pass
+        if KEY_ANY_RE.search(content):
+            return
+    atomic_write(backup, content)
+
+
+# 定位 [features] 段（行首精确；段界 = 下一个段头行或 EOF）
+section_idx = -1
+for idx, line in enumerate(lines):
+    if SECTION_RE.match(line):
+        section_idx = idx
+        break
+
+if section_idx >= 0:
+    end_idx = len(lines)
+    for idx in range(section_idx + 1, len(lines)):
+        if SECTION_ANY_RE.match(lines[idx]):
+            end_idx = idx
+            break
+    key_idx = -1
+    for idx in range(section_idx + 1, end_idx):
+        if KEY_ANY_RE.match(lines[idx]):
+            key_idx = idx
+            break
+    if key_idx >= 0:
+        if KEY_TRUE_RE.match(lines[key_idx]):
+            print('exists')
+        else:
+            # ② 用户显式非 true：尊重配置，零写入
+            print('respected')
+        sys.exit(0)
+    # ③ 段存在缺键 → 段末（下一个段头前）插入
+    insert_lines = ['multi_agent = true']
+    backup_original()
+    new_lines = lines[:end_idx] + insert_lines + lines[end_idx:]
+    atomic_write(path, '\n'.join(new_lines))
+    print('injected')
+    sys.exit(0)
+
+# ④ 无 [features] 段 → 文末追加（确保前文以换行收尾）
+backup_original()
+new_lines = list(lines)
+while new_lines and new_lines[-1] == '':
+    new_lines.pop()
+new_lines += ['', '[features]', 'multi_agent = true', '']
+atomic_write(path, '\n'.join(new_lines))
+print('created')
+PYEOF
+    )" || status=""
+    case "$status" in
+        exists)
+            CODEX_CONFIG_RESULT="exists"
+            print_info "config.toml 已含 multi_agent = true，跳过注入: $config_file"
+            ;;
+        respected)
+            CODEX_CONFIG_RESULT="respected"
+            print_warning "config.toml [features] multi_agent 已被用户显式关闭，尊重用户配置不注入——spawn 工具（spawn_agent/wait_agent/close_agent）将不可用: $config_file"
+            ;;
+        injected)
+            CODEX_CONFIG_RESULT="injected"
+            print_success "已在 config.toml [features] 段内注入 multi_agent = true: $config_file"
+            ;;
+        created)
+            CODEX_CONFIG_RESULT="created"
+            print_success "已在 config.toml 文末追加 [features] 段 multi_agent = true: $config_file"
+            ;;
+        *)
+            CODEX_CONFIG_RESULT="failed"
+            print_warning "config.toml multi_agent 注入失败（可手动添加 [features] multi_agent = true）: $config_file"
+            ;;
+    esac
+    return 0
+}
+
+# ─── codex AGENTS.md 既有区块异形态检测（add-codex-platform D4）───────────
+_warn_codex_block_shape() {
+    # 用法: _warn_codex_block_shape <agents_md>
+    # 合并前检测既有 <!-- BudgetBuddy:begin/end --> 区块形态：区块行数 > 100
+    # （opencode 全文形态特征——12 条规则全文合并）→ 告警「同项目混装两形态
+    # 将相互替换」。轻量机制（不阻断合并），防静默覆盖：codex 轻量索引与
+    # opencode 规则全文共用同一标记区块，后装整体替换先装。
+    local target="$1"
+    [[ -f "$target" ]] || return 0
+    grep -q "<!-- BudgetBuddy:begin -->" "$target" 2>/dev/null || return 0
+    local lines=""
+    lines="$(awk '
+        /<!-- BudgetBuddy:begin -->/ { counting = 1; next }
+        /<!-- BudgetBuddy:end -->/   { counting = 0; next }
+        counting { n++ }
+        END { print n + 0 }
+    ' "$target" 2>/dev/null)" || lines="0"
+    [[ -n "$lines" && "$lines" -gt 100 ]] || return 0
+    print_warning "检测到 OpenCode 全文区块（既有 BudgetBuddy 区块 ${lines} 行 > 100），同项目混装两形态将相互替换（Codex 轻量索引 / OpenCode 规则全文共用同一标记区块）: $target"
+    return 0
+}
+
 # ─── 安装编排：包装器与 hooks 注入 ─────────────────────────────────────────
 install_wrapper() {
     # 用法: install_wrapper <lib_dir>
@@ -811,6 +999,93 @@ inject_hooks_codebuddy() {
     fi
 }
 
+inject_hooks_claudecode() {
+    # 用法: inject_hooks_claudecode <struct_root> <mgmt_root> <global_flag>
+    # claudecode 版注入（design.md D4）：hooks 文件在平台结构根（.claude/ 或
+    # ~/.claude/），注入编排模块在管理面（~/.budgetbuddy/lib/，A3 与 opencode
+    # 共享）——两根分离，区别于 codebuddy 的同根形态。子进程执行（同
+    # inject_hooks_codebuddy 先例：不污染 install.sh 自身环境；unset
+    # BUDGET_PLATFORM 防探测显式覆盖分支误判作用域）。BUDGET_SETUP_DIR 指向
+    # 结构根（hooks.sh 仅以该值定位 hook 脚本绝对路径：项目级走相对路径、
+    # 全局走 ~/.claude/hooks/）。
+    #
+    # 共装误判修复（复审 F1/F2）：子进程不再 detect_platform 探测——
+    # codebuddy 先装（all 模式必现）后再装 claudecode 时 .codebuddy/setup.sh
+    # 已就位，探测序 codebuddy 优先 → 误判 kind=codebuddy，注入错写到
+    # .codebuddy/settings.json 且 .claude/settings.json 不生成（安装器仍报
+    # 假成功）。改为调用方已知形态直传（hooks.sh 契约：显式 settings_file
+    # 跳过探测，调用方负责形态变量快照保证 hook_cmd 落点同形态）：
+    #   - settings_file = <struct_root>/settings.json（项目级即 .claude/
+    #     settings.json、全局即 ~/.claude/settings.json，由调用方计算）
+    #   - 形态快照 BUDGET_PLATFORM_KIND=claudecode + SCOPE/ROOT（项目级
+    #     root=$PWD → hook_cmd 走相对路径；全局 root 空 → BUDGET_SETUP_DIR
+    #     绝对路径）
+    # 子进程 stdout 末行回传 INJECT_RESULT=ok|failed 标记（F2：不以子进程
+    # exit 0 判成功），按标记决定 success/warning 文案；失败降级警告不阻断
+    # 安装（可 budget setup init 补全）。结果同步写入全局变量
+    # CLAUDECODE_HOOKS_RESULT（ok|failed|skipped）供安装摘要如实呈现。
+    local struct_root="$1"
+    local mgmt_root="$2"
+    local global_flag="$3"
+    local lib_dir="$mgmt_root/lib"
+    local f
+    for f in colors.sh platform.sh hooks.sh hooks_inject.py; do
+        if [[ ! -f "$lib_dir/$f" ]]; then
+            print_warning "hooks 注入模块缺失（$lib_dir/${f}），可稍后运行 budget setup init 补全"
+            CLAUDECODE_HOOKS_RESULT="skipped"
+            return 0
+        fi
+    done
+    if [[ ! -f "$struct_root/hooks/budget-notify-hook.py" ]]; then
+        print_warning "hook 脚本缺失（$struct_root/hooks/budget-notify-hook.py），跳过 hooks 注入"
+        CLAUDECODE_HOOKS_RESULT="skipped"
+        return 0
+    fi
+    # 形态快照（调用方已知，不依赖探测）：项目级 scope=project + root=$PWD；
+    # 全局 scope=global + root 空（hook_cmd 回退 BUDGET_SETUP_DIR 绝对路径）
+    local settings_file="$struct_root/settings.json"
+    local platform_scope="global" platform_root=""
+    if [[ "$global_flag" != "1" ]]; then
+        platform_scope="project"
+        platform_root="$PWD"
+    fi
+    local output rc=0
+    output="$(BUDGET_GLOBAL="$global_flag" BUDGET_SETUP_DIR="$struct_root" \
+        BUDGET_LIB_DIR="$lib_dir" BUDGET_PYTHON="$BUDGET_PYTHON" \
+        BUDGET_PLATFORM_KIND="claudecode" BUDGET_PLATFORM_SCOPE="$platform_scope" \
+        BUDGET_PLATFORM_ROOT="$platform_root" BUDGET_SETTINGS_FILE="$settings_file" \
+        bash -c '
+            unset BUDGET_PLATFORM
+            source "$BUDGET_LIB_DIR/colors.sh"
+            source "$BUDGET_LIB_DIR/platform.sh"
+            source "$BUDGET_LIB_DIR/hooks.sh"
+            if budget_inject_hooks "$BUDGET_SETTINGS_FILE"; then
+                echo "INJECT_RESULT=ok"
+            else
+                echo "INJECT_RESULT=failed"
+            fi
+        ')" || rc=$?
+    # 透传子进程 stdout（末行 INJECT_RESULT 标记行除外；stderr 已直通终端）
+    local marker
+    marker="$(printf '%s\n' "$output" | tail -n 1)"
+    if [[ -n "$output" ]]; then
+        printf '%s\n' "$output" | sed '$d'
+    fi
+    if [[ "$rc" -ne 0 \
+          || ( "$marker" != "INJECT_RESULT=ok" && "$marker" != "INJECT_RESULT=failed" ) ]]; then
+        # 子进程异常崩溃/无标记行 → 按失败降级（不阻断安装）
+        marker="INJECT_RESULT=failed"
+    fi
+    if [[ "$marker" == "INJECT_RESULT=ok" ]]; then
+        print_success "hooks 注入完成（settings.json 三事件 Notification/PermissionRequest/SubagentStop）"
+        CLAUDECODE_HOOKS_RESULT="ok"
+    else
+        print_warning "hooks 注入失败，可稍后运行 budget setup init 补全"
+        CLAUDECODE_HOOKS_RESULT="failed"
+    fi
+    return 0
+}
+
 # ─── 平台安装流程 ──────────────────────────────────────────────────────────
 install_codebuddy() {
     # codebuddy：dist/codebuddy/ 全部结构文件 → .codebuddy/（项目）或
@@ -839,6 +1114,27 @@ install_codebuddy() {
     upgrade_diff_cleanup "$install_root/.budget-manifest.json" "$manifest_file" "files" "all" "$install_root"
     if [[ "$CLEANED" -gt 0 ]]; then
         print_info "升级差集清理: 已删除 $CLEANED 个旧版文件（清单外用户文件不受影响）"
+    fi
+    # 2.5) AutoRun 状态重放（agent-autorun design.md D4/D5：~/.budgetbuddy/
+    #   auto-run.json 存在则 apply 全量对齐，把用户持久化选择重放回刚同步的
+    #   agent 文件——lib/autorun.py 随步骤 1 的 sync_manifest_tree 同步就位。
+    #   失败仅告警不阻断安装（可稍后运行 budget setup autorun list 检查）；
+    #   形态变量显式快照（调用方已知形态，不依赖探测），保证 apply 只作用于
+    #   本次 install_root。opencode/claudecode 分支无此钩子（不映射 auto-run））
+    local autorun_scope="project" autorun_root="$install_root"
+    if [[ "$BUDGET_INSTALL_GLOBAL" == "1" ]]; then
+        autorun_scope="global"
+        autorun_root=""
+    fi
+    if [[ -f "$HOME/.budgetbuddy/auto-run.json" ]]; then
+        if [[ -f "$install_root/lib/autorun.py" ]] && \
+            BUDGET_PLATFORM_KIND="codebuddy" BUDGET_PLATFORM_SCOPE="$autorun_scope" \
+            BUDGET_PLATFORM_ROOT="$autorun_root" BUDGET_AGENTS_DIR="$install_root/agents" \
+            "$BUDGET_PYTHON" "$install_root/lib/autorun.py" apply; then
+            print_info "AutoRun 状态重放完成（~/.budgetbuddy/auto-run.json）"
+        else
+            print_warning "AutoRun 状态重放失败（$install_root/lib/autorun.py），可稍后运行 budget setup autorun list 检查状态"
+        fi
     fi
     # 3) setup.sh 可执行
     chmod +x "$install_root/setup.sh" 2>/dev/null || true
@@ -922,12 +1218,13 @@ install_opencode() {
 }
 
 install_claudecode() {
-    # claudecode：dist/claudecode/{agents,commands,skills} → 平台结构目录
-    # （项目 .claude/ 或全局 ~/.claude/，复数目录前缀区别于 opencode 单数）；
+    # claudecode：dist/claudecode/{agents,commands,skills,hooks} → 平台结构
+    # 目录（项目 .claude/ 或全局 ~/.claude/，复数目录前缀区别于 opencode 单数）；
     # 管理面（setup.sh/lib/models/personas/docs）统一装 ~/.budgetbuddy/（A3，
     # 与 opencode 共享，本地清单合并写）；CLAUDE.fragment.md 幂等合并进
     # CLAUDE.md（项目根或 ~/.claude/CLAUDE.md，复用 merge_agents_md）。
-    # hooks 不注入（routing.hook 空串，同 opencode 先例）。
+    # hooks 文件随结构分发后注入 settings.json 三事件（design.md D4，无
+    # superpowers 插件机制）。
     local dist_root="$BUDGET_SRC_ROOT/dist/claudecode"
     local manifest_file="$dist_root/.manifest.json"
     [[ -f "$manifest_file" ]] || print_error "产物清单缺失: ${manifest_file}（请先运行 python3 scripts/build.py）"
@@ -945,7 +1242,7 @@ install_claudecode() {
         print_info "Claude Code 项目安装 → ${struct_root}（管理面 → $HOME/.budgetbuddy）"
     fi
     mgmt_root="$HOME/.budgetbuddy"
-    local struct_prefixes="agents commands skills"
+    local struct_prefixes="agents commands skills hooks"
 
     # 1) 平台结构同步（agents/commands/skills 复数前缀）
     SYNC_ADDED=0; SYNC_UPDATED=0; SYNC_SKIPPED=0
@@ -976,12 +1273,115 @@ install_claudecode() {
     print_success "本地安装清单已写入: $mgmt_root/.budget-manifest.json"
     # 7) 命令包装器（budget CLI 对 Claude Code 形态同样可用，管理面在 ~/.budgetbuddy/）
     install_wrapper "$mgmt_root/lib"
+    # 8) hooks 注入（settings.json 三事件：Notification/PermissionRequest/
+    #    SubagentStop；无 superpowers 插件机制，design.md D4）——形态快照 +
+    #    显式 settings_file 直传（共装误判修复，详见 inject_hooks_claudecode
+    #    注释）；摘要按 CLAUDECODE_HOOKS_RESULT 如实呈现（失败/跳过降级提示，
+    #    不阻断安装）
+    CLAUDECODE_HOOKS_RESULT="failed"
+    inject_hooks_claudecode "$struct_root" "$mgmt_root" "$BUDGET_INSTALL_GLOBAL"
+    local hooks_line="hooks:     ${struct_root}/settings.json（Notification/PermissionRequest/SubagentStop）"
+    case "$CLAUDECODE_HOOKS_RESULT" in
+        failed)
+            hooks_line="hooks:     注入失败（可运行 budget setup init 补全）"
+            ;;
+        skipped)
+            hooks_line="hooks:     未注入（模块或 hook 脚本缺失，可运行 budget setup init 补全）"
+            ;;
+    esac
+    SUMMARY_OUTPUT+="$hooks_line"$'\n'
 
     local total=$((struct_added + struct_updated + struct_skipped + SYNC_ADDED + SYNC_UPDATED + SYNC_SKIPPED))
     SUMMARY_OUTPUT+="平台:      Claude Code（${scope_label}）"$'\n'
     SUMMARY_OUTPUT+="落点:      ${struct_root}（结构） + ${mgmt_root}（管理面）"$'\n'
     SUMMARY_OUTPUT+="文件:      $total 个（新增 $((struct_added + SYNC_ADDED)) / 更新 $((struct_updated + SYNC_UPDATED)) / 跳过 $((struct_skipped + SYNC_SKIPPED))）"$'\n'
     SUMMARY_OUTPUT+="CLAUDE.md: ${claude_md}（标记区块）"$'\n'
+    SUMMARY_OUTPUT+="命令:      $HOME/.local/bin/budget"$'\n'
+    SUMMARY_OUTPUT+=""$'\n'
+}
+
+install_codex() {
+    # codex：dist/codex/skills/ → 平台结构目录（项目 .codex/skills/ 或全局
+    # ~/.codex/skills/，结构前缀仅 skills/——skill 形态产物，design.md D1）；
+    # 管理面（setup.sh/lib/models/personas/docs）统一装 ~/.budgetbuddy/（A3，
+    # 与 opencode/claudecode 共享，本地清单合并写，codex: 前缀段）。
+    # AGENTS.fragment.md 轻量区块合并进项目根 AGENTS.md 或 ~/.codex/AGENTS.md
+    # （复用 merge_agents_md；~/.codex 目录不存在时创建；合并前异形态检测——
+    # 既有区块为 opencode 全文形态时告警）；config.toml [features]
+    # multi_agent = true 幂等注入（inject_codex_config 四态）。Codex 无 hooks
+    # 机制（实验态不分发），无 settings 注入步骤。
+    local dist_root="$BUDGET_SRC_ROOT/dist/codex"
+    local manifest_file="$dist_root/.manifest.json"
+    [[ -f "$manifest_file" ]] || print_error "产物清单缺失: ${manifest_file}（请先运行 python3 scripts/build.py）"
+
+    local struct_root="" mgmt_root="" agents_md="" scope_label=""
+    if [[ "$BUDGET_INSTALL_GLOBAL" == "1" ]]; then
+        struct_root="$HOME/.codex"
+        agents_md="$HOME/.codex/AGENTS.md"
+        scope_label="全局"
+        print_info "Codex 全局安装 → ${struct_root}（管理面 → $HOME/.budgetbuddy）"
+    else
+        struct_root="$PWD/.codex"
+        agents_md="$PWD/AGENTS.md"
+        scope_label="项目级"
+        print_info "Codex 项目安装 → ${struct_root}（管理面 → $HOME/.budgetbuddy）"
+    fi
+    mgmt_root="$HOME/.budgetbuddy"
+    local struct_prefixes="skills"
+
+    # 1) 平台结构同步（skills/ 前缀；~/.codex 目录不存在时创建）
+    mkdir -p "$struct_root"
+    SYNC_ADDED=0; SYNC_UPDATED=0; SYNC_SKIPPED=0
+    sync_manifest_tree "$dist_root" "$manifest_file" "$struct_root" "struct" "$struct_prefixes"
+    local struct_added=$SYNC_ADDED struct_updated=$SYNC_UPDATED struct_skipped=$SYNC_SKIPPED
+    # 2) 管理面同步（lib/setup.sh/models/personas/docs → ~/.budgetbuddy/）
+    SYNC_ADDED=0; SYNC_UPDATED=0; SYNC_SKIPPED=0
+    sync_manifest_tree "$dist_root" "$manifest_file" "$mgmt_root" "mgmt" "$struct_prefixes"
+    print_success "Codex 文件同步完成: 结构 新增 $struct_added / 更新 $struct_updated / 跳过 ${struct_skipped}；管理面 新增 $SYNC_ADDED / 更新 $SYNC_UPDATED / 跳过 ${SYNC_SKIPPED}（清单外文件一律保留）"
+    # 3) AGENTS.fragment.md 轻量区块合并（合并前异形态检测：opencode 全文
+    #    形态告警，防静默覆盖）
+    _warn_codex_block_shape "$agents_md"
+    merge_agents_md "$dist_root/AGENTS.fragment.md" "$agents_md"
+    # 4) config.toml multi_agent 注入（四态幂等；失败降级警告不阻断）
+    CODEX_CONFIG_RESULT="failed"
+    inject_codex_config "$struct_root/config.toml"
+    # 5) 升级差集清理（本平台段 platform_files:codex + 共享管理面 files；
+    #    多平台共装时管理面清理跳过——他平台管理面文件不在本平台产物清单内）
+    CLEANED=0
+    if [[ "$(local_manifest_other_platform "$mgmt_root/.budget-manifest.json" "codex")" == "1" ]]; then
+        print_info "检测到其他平台共装 ~/.budgetbuddy/，跳过管理面差集清理（避免误删他平台管理面文件）"
+    else
+        upgrade_diff_cleanup "$mgmt_root/.budget-manifest.json" "$manifest_file" "files" "mgmt" "$mgmt_root" "$struct_prefixes"
+    fi
+    upgrade_diff_cleanup "$mgmt_root/.budget-manifest.json" "$manifest_file" "platform_files:codex" "struct" "$struct_root" "$struct_prefixes"
+    if [[ "$CLEANED" -gt 0 ]]; then
+        print_info "升级差集清理: 已删除 $CLEANED 个旧版文件（清单外用户文件不受影响）"
+    fi
+    # 6) setup.sh 可执行
+    chmod +x "$mgmt_root/setup.sh" 2>/dev/null || true
+    # 7) 本地清单（合并写：files = 管理面 + platform_files = codex: 前缀段）
+    write_local_manifest "$mgmt_root/.budget-manifest.json" "$manifest_file" "codex"
+    print_success "本地安装清单已写入: $mgmt_root/.budget-manifest.json"
+    # 8) 命令包装器（budget CLI 对 Codex 形态同样可用，管理面在 ~/.budgetbuddy/）
+    install_wrapper "$mgmt_root/lib"
+
+    # 摘要 config 行按注入结果如实呈现（exists/injected/created 统一为已启用）
+    local config_line="config:    ${struct_root}/config.toml（[features] multi_agent = true）"
+    case "$CODEX_CONFIG_RESULT" in
+        respected)
+            config_line="config:    multi_agent 被用户显式关闭（spawn 工具不可用）: ${struct_root}/config.toml"
+            ;;
+        failed)
+            config_line="config:    注入失败（可手动添加 [features] multi_agent = true）: ${struct_root}/config.toml"
+            ;;
+    esac
+
+    local total=$((struct_added + struct_updated + struct_skipped + SYNC_ADDED + SYNC_UPDATED + SYNC_SKIPPED))
+    SUMMARY_OUTPUT+="平台:      Codex（${scope_label}）"$'\n'
+    SUMMARY_OUTPUT+="落点:      ${struct_root}（结构） + ${mgmt_root}（管理面）"$'\n'
+    SUMMARY_OUTPUT+="文件:      $total 个（新增 $((struct_added + SYNC_ADDED)) / 更新 $((struct_updated + SYNC_UPDATED)) / 跳过 $((struct_skipped + SYNC_SKIPPED))）"$'\n'
+    SUMMARY_OUTPUT+="AGENTS.md: ${agents_md}（轻量区块）"$'\n'
+    SUMMARY_OUTPUT+="$config_line"$'\n'
     SUMMARY_OUTPUT+="命令:      $HOME/.local/bin/budget"$'\n'
     SUMMARY_OUTPUT+=""$'\n'
 }
@@ -1010,6 +1410,11 @@ print_summary() {
     case "$BUDGET_INSTALL_PLATFORM" in
         claudecode|all)
             echo "  Claude Code 会话内输入 /budget:start 启动工作流"
+            ;;
+    esac
+    case "$BUDGET_INSTALL_PLATFORM" in
+        codex|all)
+            echo "  Codex 会话内以自然语言触发 budget-workflow skill 启动工作流"
             ;;
     esac
     echo "  budget setup uninstall     卸载（按本地清单删除，清单外文件保留）"
@@ -1055,8 +1460,9 @@ main() {
         codebuddy)  install_codebuddy ;;
         opencode)   install_opencode ;;
         claudecode) install_claudecode ;;
+        codex)      install_codex ;;
         both)       install_codebuddy; install_opencode ;;
-        all)        install_codebuddy; install_opencode; install_claudecode ;;
+        all)        install_codebuddy; install_opencode; install_claudecode; install_codex ;;
         *)          print_error "内部错误: 未知平台 $BUDGET_INSTALL_PLATFORM" ;;
     esac
     print_summary

@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "description": "BudgetBuddy 可用模型目录与三平台（CodeBuddy/OpenCode/Claude Code）三档预设配置",
+    "description": "BudgetBuddy 可用模型目录与四平台（CodeBuddy/OpenCode/Claude Code/Codex）三档预设配置",
     "update_command": "budget setup models",
     "updated_at": "2026-10-20"
   },
@@ -453,6 +453,45 @@
       ],
       "gpt": [
         {
+          "cost": "x0.18",
+          "id": "gpt-5.6-luna",
+          "note": "部署别名：需在部署环境将别名映射到实际模型（本机 codex 无该别名映射可核对，永久标注于 platforms.codex.unconfirmed_ids，映射就绪后移除）；cost 参照组内同档条目，实际定价以部署环境为准",
+          "platform": [
+            "codex"
+          ],
+          "tags": [
+            "code",
+            "fast"
+          ],
+          "tier": "budget"
+        },
+        {
+          "cost": "x3.31",
+          "id": "gpt-5.6-sol",
+          "note": "部署别名：需在部署环境将别名映射到实际模型（本机 codex 无该别名映射可核对，永久标注于 platforms.codex.unconfirmed_ids，映射就绪后移除）；cost 参照组内同档条目，实际定价以部署环境为准",
+          "platform": [
+            "codex"
+          ],
+          "tags": [
+            "code",
+            "reasoning"
+          ],
+          "tier": "top"
+        },
+        {
+          "cost": "x1.25",
+          "id": "gpt-5.6-terra",
+          "note": "部署别名：需在部署环境将别名映射到实际模型（本机 codex 无该别名映射可核对，永久标注于 platforms.codex.unconfirmed_ids，映射就绪后移除）；cost 参照组内同档条目，实际定价以部署环境为准",
+          "platform": [
+            "codex"
+          ],
+          "tags": [
+            "code",
+            "general"
+          ],
+          "tier": "mid"
+        },
+        {
           "cost": "x3.31",
           "id": "gpt-5.5",
           "platform": [
@@ -586,7 +625,7 @@
         "- 本平台预设值为 Claude Code 原生 claude 系模型 ID（economic→haiku 系、balanced→sonnet 系、quality→opus 系三档梯度）；构建期以 balanced 档烘焙 agent 产物的 model 字段。",
         "- 三档预设模型 ID（claude-haiku-5-5 / claude-sonnet-5-5 / claude-opus-5-5）已于 2026-10-20 在本机 Claude Code 2.1.304 实测核对（零告警、调用成功）。",
         "- 安装后可通过 `budget setup agent preset <economic|balanced|quality>` 批量切换档位，`budget setup agent custom <模型ID或别名>` 自定义覆写（简写别名经 aliases 表解析），`budget setup agent inherit` 跟随主会话模型。",
-        "- hooks 通知首发不支持（routing.hook 为空串不分发），通知能力经 notify CLI 降级路径提供。"
+        "- hooks 三事件通知已支持（Notification / PermissionRequest / SubagentStop，注入 .claude/settings.json），notify CLI 仍可用于显式发送通知。"
       ],
       "presets": {
         "balanced": {
@@ -626,6 +665,58 @@
           "tester": "claude-opus-5-5"
         }
       }
+    },
+    "codex": {
+      "note": [
+        "- 本平台预设值为 gpt 组部署别名（economic→gpt-5.6-luna 低成本档、balanced→gpt-5.6-terra 平衡默认档、quality→gpt-5.6-sol 高质量档，档内十角色统一模型）；使用前需在部署环境将别名映射到实际模型。",
+        "- 模型选择发生在 spawn_agent 调用参数（Leader 查本表后传递，见 budget-workflow/codex-runtime.md），agent 素材文档无 model 烘焙；`budget setup agent preset/custom/inherit` 在 codex 形态降级（无 frontmatter 可切换）。",
+        "- 三别名为部署别名，无法集中核对（依赖用户环境映射），unconfirmed_ids 为永久标注、不适用上线前清零纪律；部署环境映射就绪后手动移除。",
+        "- 模型不可用时的逃生门：编辑本文件 platforms.codex.presets（`budget setup models` 指引）或 spawn 时显式传 model 参数——非 `budget setup agent custom`（该子命令已降级）。",
+        "- Codex 无 hooks 机制，事件 hook 注入不支持；通知调度（budget notify CLI）仍可用。"
+      ],
+      "presets": {
+        "balanced": {
+          "architect": "gpt-5.6-terra",
+          "coder_lite": "gpt-5.6-terra",
+          "coder_senior": "gpt-5.6-terra",
+          "coder_standard": "gpt-5.6-terra",
+          "director": "gpt-5.6-terra",
+          "goal_evaluator": "gpt-5.6-terra",
+          "recorder": "gpt-5.6-terra",
+          "reviewer": "gpt-5.6-terra",
+          "reviewer_b": "gpt-5.6-terra",
+          "tester": "gpt-5.6-terra"
+        },
+        "economic": {
+          "architect": "gpt-5.6-luna",
+          "coder_lite": "gpt-5.6-luna",
+          "coder_senior": "gpt-5.6-luna",
+          "coder_standard": "gpt-5.6-luna",
+          "director": "gpt-5.6-luna",
+          "goal_evaluator": "gpt-5.6-luna",
+          "recorder": "gpt-5.6-luna",
+          "reviewer": "gpt-5.6-luna",
+          "reviewer_b": "gpt-5.6-luna",
+          "tester": "gpt-5.6-luna"
+        },
+        "quality": {
+          "architect": "gpt-5.6-sol",
+          "coder_lite": "gpt-5.6-sol",
+          "coder_senior": "gpt-5.6-sol",
+          "coder_standard": "gpt-5.6-sol",
+          "director": "gpt-5.6-sol",
+          "goal_evaluator": "gpt-5.6-sol",
+          "recorder": "gpt-5.6-sol",
+          "reviewer": "gpt-5.6-sol",
+          "reviewer_b": "gpt-5.6-sol",
+          "tester": "gpt-5.6-sol"
+        }
+      },
+      "unconfirmed_ids": [
+        "gpt-5.6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra"
+      ]
     },
     "codebuddy": {
       "note": [

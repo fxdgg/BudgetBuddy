@@ -5,6 +5,7 @@ model: deepseek-v4-pro
 tools: [Read, Write, Edit, Bash, Grep, Glob, WebFetch, WebSearch]
 permissionMode: acceptEdits
 max_turns: 70
+enabledAutoRun: true
 ---
 
 > **角色身份**：启动时读取 persona 配置（项目级 `.budget/persona-active.json`，不存在则尝试全局 `~/.budgetbuddy/persona-active.json`）。你在 Agent 调用中的名称为「coder-senior」，对应 persona 角色键 `roles.coder-senior`。如果 persona 文件不存在，使用默认名称「Coder-Senior」。在后续所有回复中使用该角色名自称，并向 persona 文件中 `greeting` 字段指定的称呼汇报；greeting 为空或文件不存在时，直接以默认名称自称即可。

@@ -8,13 +8,14 @@
 #
 # 校验内容:
 #   ① 文件完整性: 按平台结构清单（agents 10 / commands budget×3+opsx×4 /
-#      skills 6 / rules 12 / hooks（仅 codebuddy）/ lib 基础层 4 /
+#      skills 6 / rules 12 / hooks（codebuddy/claudecode）/ lib 基础层 4 /
 #      setup.sh / budget-models.json / personas.json），落点按 platform.sh
 #      探测（design.md §10 安装落点）
 #   ② JSON 数据校验: budget-models.json 可解析且 roles 恰为十角色键；
 #      personas.json 可解析且内置五主题齐全、每主题 roles 完整覆盖 11 键
 #   ③ hooks 注入状态查询: hooks.sh 就位时调 budget_check_hooks（信息性，
-#      不计入通过/失败项）；未就位跳过提示
+#      不计入通过/失败项；claudecode 形态输出三事件注入状态，不显示
+#      superpowers 行）；未就位跳过提示
 #
 # 落点决策（platform.sh 探测结果，design.md §10）:
 #   codebuddy（project/global）: 结构根 = 安装根（setup.sh 同目录，
@@ -23,9 +24,14 @@
 #       管理面（lib/setup.sh/models/personas）= 安装根（~/.budgetbuddy/，A3）；
 #       rules 校验 AGENTS.fragment.md 的 12 个 rule 区块标记
 #   claudecode: 结构根 = agents 目录父目录（.claude/ 或 ~/.claude/，复数
-#       agents/commands/skills 与 codebuddy 同构）；管理面同 opencode 共享
+#       agents/commands/skills/hooks 与 codebuddy 同构）；管理面同 opencode 共享
 #       ~/.budgetbuddy/（A3）；rules 校验 CLAUDE.fragment.md（安装器合并进
 #       CLAUDE.md：项目根或 ~/.claude/CLAUDE.md）的 12 个 rule 区块标记
+#   codex: 结构根 = .codex/（项目）或 ~/.codex/（全局，按 SCOPE/ROOT 定位）；
+#       管理面同 opencode/claudecode 共享 ~/.budgetbuddy/（A3）；校验
+#       skills/budget-workflow 完整性（agents×10 / commands×7 / rules×12 /
+#       codex-runtime.md）、AGENTS.md 轻量区块 12 条索引标记（项目根或
+#       ~/.codex/AGENTS.md）与 config.toml multi_agent 启用状态
 #
 # Dependencies（setup.sh source 基础层后分发调用）:
 #   colors.sh    - budget_print_*
@@ -60,12 +66,34 @@ _budget_validate_structure_dir() {
     #   codebuddy → 安装根（BUDGET_SETUP_DIR，结构与管理面同根）
     #   opencode  → agent 目录父目录（.opencode/ 或 ~/.config/opencode/）
     #   claudecode → agents 目录父目录（.claude/ 或 ~/.claude/）
-    if [[ ( "${BUDGET_PLATFORM_KIND:-}" == "opencode" || "${BUDGET_PLATFORM_KIND:-}" == "claudecode" ) \
+    #   codex → .codex/（项目）或 ~/.codex/（全局，按 SCOPE/ROOT 定位——
+    #       BUDGET_AGENTS_DIR 为 skill 深层素材目录，不适用父目录回溯）
+    if [[ "${BUDGET_PLATFORM_KIND:-}" == "codex" ]]; then
+        if [[ "${BUDGET_PLATFORM_SCOPE:-}" == "project" && -n "${BUDGET_PLATFORM_ROOT:-}" ]]; then
+            echo "$BUDGET_PLATFORM_ROOT/.codex"
+        else
+            echo "$HOME/.codex"
+        fi
+    elif [[ ( "${BUDGET_PLATFORM_KIND:-}" == "opencode" || "${BUDGET_PLATFORM_KIND:-}" == "claudecode" ) \
           && -n "${BUDGET_AGENTS_DIR:-}" ]]; then
         dirname "$BUDGET_AGENTS_DIR"
     else
         echo "$BUDGET_SETUP_DIR"
     fi
+}
+
+# ─── 内部辅助：codex config.toml multi_agent 启用检查 ─────────────────────
+_budget_validate_codex_multi_agent() {
+    # 用法: _budget_validate_codex_multi_agent <config_file>
+    # [features] 段内 multi_agent = true 检查（段头行首精确，防
+    # [features.xxx] 子串误判；容忍 = 两侧空格变体）。返回 0 = 已启用。
+    local config_file="$1"
+    [[ -f "$config_file" ]] || return 1
+    awk '
+        /^\[/ { in_features = ($0 ~ /^\[features\][ \t]*(#.*)?$/) }
+        in_features && $0 ~ /^multi_agent[ \t]*=[ \t]*true[ \t]*(#.*)?$/ { found = 1 }
+        END { exit (found ? 0 : 1) }
+    ' "$config_file" 2>/dev/null
 }
 
 # ─── 内部辅助：单文件存在性检查（✓/✗ + 计数 + 失败清单）──────────────────
@@ -174,7 +202,7 @@ do_validate() {
     detect_platform >/dev/null || true
     if [[ "${BUDGET_PLATFORM_KIND:-unknown}" == "unknown" ]]; then
         budget_print_error "未检测到 BudgetBuddy 安装形态，无法确定校验落点"
-        budget_print_info "提示: BUDGET_PLATFORM=codebuddy|claudecode|opencode 显式指定平台"
+        budget_print_info "提示: BUDGET_PLATFORM=codebuddy|claudecode|opencode|codex 显式指定平台"
         return 1
     fi
 
@@ -193,14 +221,23 @@ do_validate() {
     # ---- ① 文件完整性 ----
     echo "── 文件完整性 ──"
 
-    # agents（10，§6 十角色；BUDGET_AGENTS_DIR 由 platform.sh 探测）
+    # agents（10，§6 十角色；BUDGET_AGENTS_DIR 由 platform.sh 探测；codex
+    # 落 skill 内素材目录 skills/budget-workflow/agents/——按结构根计算，
+    # 不依赖探测变量）
+    local agents_dir="$BUDGET_AGENTS_DIR"
+    local agents_label="agents"
+    if [[ "$kind" == "codex" ]]; then
+        agents_dir="$structure_dir/skills/budget-workflow/agents"
+        agents_label="skills/budget-workflow/agents"
+    fi
     local name
     for name in "${BUDGET_SUITE_AGENTS[@]}"; do
-        _budget_validate_check "agents/$name.md" "$BUDGET_AGENTS_DIR/$name.md"
+        _budget_validate_check "$agents_label/$name.md" "$agents_dir/$name.md"
     done
 
     # commands（budget×3 + opsx×4；codebuddy/claudecode commands/<group>/<name>.md
-    # （分组目录同构），opencode command/<group>-<name>.md，design.md §10 落点）
+    # （分组目录同构），opencode command/<group>-<name>.md，codex 落 skill 内
+    # commands/<group>-<name>.md（design.md §10 / D1 落点））
     local cmd
     if [[ "$kind" == "opencode" ]]; then
         for cmd in "${_budget_validate_budget_commands[@]}"; do
@@ -208,6 +245,15 @@ do_validate() {
         done
         for cmd in "${_budget_validate_opsx_commands[@]}"; do
             _budget_validate_check "command/opsx-$cmd.md" "$structure_dir/command/opsx-$cmd.md"
+        done
+    elif [[ "$kind" == "codex" ]]; then
+        for cmd in "${_budget_validate_budget_commands[@]}"; do
+            _budget_validate_check "skills/budget-workflow/commands/budget-$cmd.md" \
+                "$structure_dir/skills/budget-workflow/commands/budget-$cmd.md"
+        done
+        for cmd in "${_budget_validate_opsx_commands[@]}"; do
+            _budget_validate_check "skills/budget-workflow/commands/opsx-$cmd.md" \
+                "$structure_dir/skills/budget-workflow/commands/opsx-$cmd.md"
         done
     else
         for cmd in "${_budget_validate_budget_commands[@]}"; do
@@ -228,7 +274,8 @@ do_validate() {
         _budget_validate_check "$skills_root/$skill/SKILL.md" "$structure_dir/$skills_root/$skill/SKILL.md"
     done
 
-    # rules（12；codebuddy 逐文件 .mdc / opencode+claudecode fragment 12 区块）
+    # rules（12；codebuddy 逐文件 .mdc / opencode+claudecode fragment 12 区块 /
+    # codex skill 内全文副本 .md + AGENTS.md 轻量区块 12 条索引标记）
     local rule
     if [[ "$kind" == "opencode" || "$kind" == "claudecode" ]]; then
         local fragment=""
@@ -268,14 +315,67 @@ do_validate() {
                 fi
             done
         fi
+    elif [[ "$kind" == "codex" ]]; then
+        # 规则全文副本（skills/budget-workflow/rules/budget-<name>.md，构建期
+        # 从 core/rules/ 单真值源复制，design D3）
+        for rule in "${_budget_validate_rules[@]}"; do
+            _budget_validate_check "skills/budget-workflow/rules/budget-$rule.md" \
+                "$structure_dir/skills/budget-workflow/rules/budget-$rule.md"
+        done
+        # AGENTS.md 轻量区块 12 条索引标记（合并目标：项目根 AGENTS.md 或
+        # ~/.codex/AGENTS.md；候选链同 claudecode 先例——结构根 fragment
+        # （源形态）> 结构根 AGENTS.md（全局合并形态）> 项目根 AGENTS.md
+        # （项目合并形态）> 管理面 fragment）
+        local cx_fragment=""
+        local cx_candidate
+        for cx_candidate in "$structure_dir/AGENTS.fragment.md" \
+                              "$structure_dir/AGENTS.md" \
+                              "$BUDGET_SETUP_DIR/AGENTS.fragment.md"; do
+            if [[ -f "$cx_candidate" ]]; then
+                cx_fragment="$cx_candidate"
+                break
+            fi
+        done
+        if [[ -z "$cx_fragment" && "${BUDGET_PLATFORM_SCOPE:-}" == "project" \
+              && -n "${BUDGET_PLATFORM_ROOT:-}" ]] \
+            && [[ -f "$BUDGET_PLATFORM_ROOT/AGENTS.md" ]]; then
+            cx_fragment="$BUDGET_PLATFORM_ROOT/AGENTS.md"
+        fi
+        if [[ -z "$cx_fragment" ]]; then
+            _budget_validate_total=$((_budget_validate_total + 1))
+            budget_print_error "AGENTS.md 轻量区块（缺失: $structure_dir/AGENTS.fragment.md）"
+            _budget_validate_failed+=("AGENTS.md 轻量区块")
+        else
+            for rule in "${_budget_validate_rules[@]}"; do
+                _budget_validate_total=$((_budget_validate_total + 1))
+                if grep -qF "budget-$rule.md" "$cx_fragment"; then
+                    budget_print_success "AGENTS.md 索引 budget-$rule"
+                else
+                    budget_print_error "AGENTS.md 索引 budget-${rule}（缺失标记）"
+                    _budget_validate_failed+=("AGENTS.md 索引 budget-$rule")
+                fi
+            done
+        fi
+        # 派工契约（codex-runtime.md，design D6）
+        _budget_validate_check "skills/budget-workflow/codex-runtime.md" \
+            "$structure_dir/skills/budget-workflow/codex-runtime.md"
+        # config.toml multi_agent 启用（spawn 工具前提，add-codex-platform D4）
+        _budget_validate_total=$((_budget_validate_total + 1))
+        if _budget_validate_codex_multi_agent "$structure_dir/config.toml"; then
+            budget_print_success "config.toml multi_agent = true（spawn 工具已启用）"
+        else
+            budget_print_error "config.toml multi_agent 未启用（缺失或未注入: $structure_dir/config.toml）"
+            _budget_validate_failed+=("config.toml multi_agent")
+        fi
     else
+        # codebuddy：逐文件 .mdc（rules/budget-<name>.mdc）
         for rule in "${_budget_validate_rules[@]}"; do
             _budget_validate_check "rules/budget-$rule.mdc" "$structure_dir/rules/budget-$rule.mdc"
         done
     fi
 
-    # hooks（仅 codebuddy；opencode/claudecode 无 hooks 机制，design.md §9）
-    if [[ "$kind" == "codebuddy" ]]; then
+    # hooks（codebuddy/claudecode 形态；opencode/codex 无 hooks 机制，design.md §9）
+    if [[ "$kind" == "codebuddy" || "$kind" == "claudecode" ]]; then
         _budget_validate_check "hooks/budget-notify-hook.py" "$structure_dir/hooks/budget-notify-hook.py"
     fi
 
@@ -314,7 +414,9 @@ do_validate() {
 
     # ---- ③ hooks 注入状态查询（信息性，不计入通过/失败）----
     echo "── hooks 注入状态 ──"
-    if declare -f budget_check_hooks &>/dev/null; then
+    if [[ "$kind" == "codex" ]]; then
+        budget_print_info "Codex 平台无 hooks 机制（实验态不分发），跳过注入状态查询"
+    elif declare -f budget_check_hooks &>/dev/null; then
         budget_check_hooks || true
     else
         budget_print_info "hooks 模块未安装（lib/hooks.sh），跳过注入状态查询"

@@ -1,6 +1,6 @@
 #!/bin/bash
 # BudgetBuddy 管理入口：budget setup <子命令>（design.md §8.1/A11）
-# 用法: setup.sh [init|show|agent|persona|validate|diff|stats|update|reinstall|uninstall|guard|quickstart|models|notify|status|help]
+# 用法: setup.sh [init|show|agent|persona|validate|diff|stats|autorun|update|reinstall|uninstall|guard|quickstart|models|notify|status|help]
 
 set -euo pipefail
 
@@ -409,6 +409,7 @@ budget_cmd_help() {
   validate       安装完整性校验
   diff [preset]  当前配置 vs 预设对比（默认 balanced）
   stats          工作流统计
+  autorun list|on|off  子代理免审批（AutoRun）：list 双栏查看 / on <agent>... 开启 / off <agent>... 关闭
   update         增量更新（budget update 为顶层快捷别名）
   reinstall      uninstall + init 组合重装
   uninstall      卸载
@@ -489,6 +490,19 @@ budget_main() {
                 exec "$BUDGET_PYTHON" "$BUDGET_LIB_DIR/display.py" "$@"
             fi
             budget_print_error "子命令 'stats' 的实现模块尚未安装（lib/display.py）"
+            budget_print_info "请先完成安装或更新：budget setup update"
+            return 1
+            ;;
+        autorun)
+            if [[ -f "$BUDGET_LIB_DIR/autorun.py" ]]; then
+                # 平台探测注入形态变量（autorun.py on/off 补丁作用域定位；
+                # detect_platform 的变量副作用需 export 后才能传入子进程）
+                shift
+                detect_platform >/dev/null || true
+                export BUDGET_PLATFORM_KIND BUDGET_PLATFORM_SCOPE BUDGET_PLATFORM_ROOT BUDGET_AGENTS_DIR
+                exec "$BUDGET_PYTHON" "$BUDGET_LIB_DIR/autorun.py" "$@"
+            fi
+            budget_print_error "子命令 'autorun' 的实现模块尚未安装（lib/autorun.py）"
             budget_print_info "请先完成安装或更新：budget setup update"
             return 1
             ;;

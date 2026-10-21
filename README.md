@@ -16,6 +16,7 @@ The kit is self-bootstrapped: this repository is developed with BudgetBuddy's ow
 - **Five-phase workflow** — proposal & design → dual design review → tiered implementation → final review & regression → archive; phases cannot be skipped
 - **Three-tier model presets** — `economic` / `balanced` / `quality`, one command to switch; per-agent `custom` override and `inherit` (follow the main panel model) also supported
 - **5 persona themes** — default (professional), tech-legends, sanguo, shuihu, genshin; role names and greetings change with the theme
+- **Execution agents AutoRun** — 4 execution sub-agents (coder-lite / coder-standard / coder-senior / tester) ship with AutoRun on by default (no per-call approval); `budget setup autorun` manages the rest
 - **Universal webhook notifications** — WeCom bot / DingTalk bot (HMAC-SHA256 signed) / Feishu bot (card) / custom webhook, 11 workflow event switches (N1–N11)
 - **Coder Guard** — per-coder, per-task-tag failure records over a 5-attempt window; 2+ failures trigger automatic tier downgrade
 - **Goal Loop** — goal-driven macro loop: define goal → run pipeline → verify → iterate until the goal is met (max 8 iterations, safety boundaries included)
@@ -59,7 +60,7 @@ bash install.sh
 
 - **CodeBuddy**: agents/rules/skills/commands land under `.codebuddy/`; hooks are injected into `settings.json` (with backup) and the Superpowers plugin is auto-enabled; the `budget` CLI is written to `~/.local/bin/budget`.
 - **OpenCode**: agents/commands/skills land under the OpenCode directory; rules are merged into `AGENTS.md` as a marked block; hooks have no native equivalent — see `core/docs/opencode-setup-notes.md` for the plugin extension point.
-- **Claude Code**: agents/commands/skills land under `.claude/` (project) or `~/.claude/` (global); rules are merged into `CLAUDE.md` (project root or `~/.claude/CLAUDE.md`) as a marked block; the management plane is shared with OpenCode under `~/.budgetbuddy/`; hooks are not injected in the first release — notifications fall back to the `budget notify` CLI.
+- **Claude Code**: agents/commands/skills land under `.claude/` (project) or `~/.claude/` (global); rules are merged into `CLAUDE.md` (project root or `~/.claude/CLAUDE.md`) as a marked block; the management plane is shared with OpenCode under `~/.budgetbuddy/`; hooks three-event notifications are supported (Notification / PermissionRequest / SubagentStop).
 - Windows: use Git Bash or WSL (PowerShell aliases `curl` to `Invoke-WebRequest`).
 - Project and global installs can coexist; project-level takes priority.
 
@@ -83,7 +84,7 @@ bash install.sh
 /budget:start "Add user login API with JWT auth"
 ```
 
-A project-level install lands agents/commands/skills under `.claude/` and merges the rules into `CLAUDE.md` as a marked block; a global install lands under `~/.claude/` (with `~/.claude/CLAUDE.md`). ⚠️ Hooks notifications are not supported on Claude Code in the first release — use `budget notify "<msg>" <event>` instead.
+A project-level install lands agents/commands/skills under `.claude/` and merges the rules into `CLAUDE.md` as a marked block; a global install lands under `~/.claude/` (with `~/.claude/CLAUDE.md`). Hooks three-event notifications are supported on Claude Code (Notification / PermissionRequest / SubagentStop); `budget notify "<msg>" <event>` remains available for explicit sends.
 
 The Leader analyzes the request, dispatches architect → dual reviewers → tiered coders → tester → final review → recorder, and reports back. For goal-driven iteration:
 
@@ -218,6 +219,35 @@ budget setup show                     # inspect the result
 
 The full catalog (models, tiers, costs, aliases, per-platform preset tables) is generated at build time into `dist/<platform>/docs/MODEL_SELECTION.md`.
 
+## Execution Agents AutoRun (Approval-Free)
+
+On CodeBuddy, the 4 execution sub-agents ship with AutoRun **on by default** — their tool calls no longer pop a per-call approval dialog (「允许一次」 remains an IDE capability):
+
+- **Default-on**: `coder-lite` / `coder-standard` / `coder-senior` / `tester`
+- **Per-call confirmation kept**: architect, reviewer + reviewer-b, recorder, director, goal-evaluator — opt them in with `budget setup autorun`
+
+```bash
+budget setup autorun list                 # status: global choice list + live install state
+budget setup autorun on reviewer          # turn AutoRun on for one agent
+budget setup autorun off coder-lite       # turn AutoRun off for one agent
+```
+
+- **`list` reads as two columns** — the global choice list (`~/.budgetbuddy/auto-run.json`) plus the live install state per agent; differences (e.g. manual IDE edits made after the state file exists) are shown as-is.
+- **Multiple project-level installs** — `on`/`off` patch only the **currently detected install** while the choice is recorded in the single global state file, so **run `on`/`off` once per project**; use the `list` two columns to spot the divergence.
+- `apply` is an internal replay/repair command used by the installer — it is not a user-facing command.
+
+> ⚠️ **Safety notice**: AutoRun makes **every** tool call within the agent's permission scope approval-free — approval is the last manual gate. The 4 default-on agents carry `bash_allow: ["*"]`, i.e. they can run **arbitrary shell commands without approval** (`rm -rf`, `git push -f` all match `*`). Turning AutoRun on for the git-class agents (architect / recorder / reviewer / reviewer-b, `bash_allow: ["git *"]`) allows high-risk git commands without approval, e.g. `git push --force`, `git clean -fd`, `git checkout -- .`. Only enable it knowingly.
+
+**Persistence** — AutoRun choices are stored in the user data directory `~/.budgetbuddy/auto-run.json`; uninstall does not clear it, and a reinstall restores it (replayed by the installer). `budget setup update` touches neither the agent files nor the state file — the completion summary's 「user data: kept」 covers `auto-run.json`.
+
+### Platform differences
+
+| Platform | AutoRun mechanism |
+|----------|-------------------|
+| CodeBuddy | Subagent frontmatter `enabledAutoRun: true`; the 4 execution agents default on; the other 6 are managed via `budget setup autorun` |
+| OpenCode | No auto-run field needed — the permission map (`ask`/`allow`/`deny`) already expresses it: `allow` = approval-free; the 4 execution agents' existing permission mappings are already equivalent |
+| Claude Code | No per-sub-agent auto-run switch; approval is handled by the session permission mode / `settings.json` permissions — `budget setup autorun` prints the alternative guidance and exits 0 without changing anything |
+
 ## Notifications
 
 Configure once in `.budget/notify.json` (project) or `~/.budgetbuddy/notify.json` (global); the project file wins when present (no merging):
@@ -241,7 +271,7 @@ Configure once in `.budget/notify.json` (project) or `~/.budgetbuddy/notify.json
 - **11 event switches (N1–N11)** — design-review rejections, review-gate exhaustion, loop overrun, Director intervention, phase transitions, goal achievement, etc.
 - **Delivery semantics** — markdown payload, 5s timeout per channel, first success stops delivery, all failures are silent (never blocks the workflow)
 - **Security** — the config file is `chmod 600` (owner-only); webhook/secret values never pass through environment variables, command-line arguments, or logs; error output is sanitized to hostname only
-- **Claude Code** — hooks notifications are not supported in the first release (no hook injection); send notifications explicitly via `budget notify "<msg>" <event>`
+- **Claude Code** — hooks three-event notifications are supported (Notification / PermissionRequest / SubagentStop); `budget notify "<msg>" <event>` remains available for explicit sends
 
 ## Repository Layout
 

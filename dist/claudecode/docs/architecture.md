@@ -115,7 +115,7 @@ flowchart TB
 
 - **基础层**：`platform.sh` 运行时五级探测（codebuddy 项目级 → codebuddy 全局 → claudecode 项目级 → claudecode 全局 → opencode 项目级优先/全局），均未命中显式报错
 - **状态机单份化**：`budget-state.py` 仅 lib 一份，skill 文档以 `$HOME/.budgetbuddy/lib/budget-state.py` 固定路径引用（三平台落位后均成立）
-- **hooks 注入**：仅 CodeBuddy；注入前备份 `settings.json.bak-budget`，临时文件 + 原子 rename 写入，同时负责 superpowers 插件启用检测
+- **hooks 注入**：CodeBuddy 与 Claude Code；注入前备份 `settings.json.bak-budget`，临时文件 + 原子 rename 写入，同时负责 superpowers 插件启用检测（CodeBuddy）
 
 ## 运行时数据流
 

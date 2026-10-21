@@ -15,6 +15,7 @@ routing:
     MODEL_SELECTION.template.md: "docs/MODEL_SELECTION.md"   # 经 A6 渲染管线输出
     PERSONAS.md: "docs/PERSONAS.md"
     architecture.md: "docs/architecture.md"
+    codex-runtime.md: null                   # codex 专属派工契约，本平台不分发
     opencode-setup-notes.md: "docs/setup-notes.md"
 agent_frontmatter:
   emit:

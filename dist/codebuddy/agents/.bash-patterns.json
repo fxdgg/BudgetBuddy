@@ -1,0 +1,51 @@
+{
+  "agents": {
+    "architect": {
+      "bash_allow": [
+        "git *",
+        "openspec *"
+      ]
+    },
+    "coder-lite": {
+      "bash_allow": [
+        "*"
+      ]
+    },
+    "coder-senior": {
+      "bash_allow": [
+        "*"
+      ]
+    },
+    "coder-standard": {
+      "bash_allow": [
+        "*"
+      ]
+    },
+    "director": {
+      "bash_allow": []
+    },
+    "goal-evaluator": {
+      "bash_allow": []
+    },
+    "recorder": {
+      "bash_allow": [
+        "git *"
+      ]
+    },
+    "reviewer": {
+      "bash_allow": [
+        "git *"
+      ]
+    },
+    "reviewer-b": {
+      "bash_allow": [
+        "git *"
+      ]
+    },
+    "tester": {
+      "bash_allow": [
+        "*"
+      ]
+    }
+  }
+}

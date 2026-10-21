@@ -30,12 +30,19 @@
 #   目录（BUDGET_AGENTS_DIR 所在 agents/ 的父目录：~/.claude/ 或 <root>/.claude/）
 #   opencode → 管理面 ~/.budgetbuddy/（A3）+ 平台结构目录（BUDGET_AGENTS_DIR
 #   所在 agent/ 的父目录：~/.config/opencode/ 或 <root>/.opencode/）
+#   codex → 管理面 ~/.budgetbuddy/（A3，与 opencode/claudecode 共享）+ 平台
+#   结构目录（<root>/.codex/ 或 ~/.codex/，按 SCOPE/ROOT 定位——BUDGET_AGENTS_DIR
+#   为 skill 内深层 agents/ 素材目录，不适用父目录回溯）；config.toml
+#   multi_agent 键清理与 AGENTS.md 区块清理独立处理（不删文件）
 #
 # 管理面共享保护（add-claudecode-platform D4 保守策略）:
 #   opencode 与 claudecode 共装时管理面统一 ~/.budgetbuddy/——卸载其一仅清理
 #   本平台段（claudecode: 前缀 platform_files 段 + 平台结构目录）与 CLAUDE.md/
 #   AGENTS.md 标记区块，管理面（files 段 + 已知结构枚举 + setup.sh/清单/包装器）
 #   仅当本地清单无其他平台段残留（或无清单形态下未探测到他平台安装）时删除。
+#   claudecode 的 settings.json（.claude/ 或 ~/.claude/）独立于共享管理面，
+#   共装 guard 下仍执行注入清理（hooks.sh budget_remove_hooks 条目级精确
+#   删除，用户第三方 hooks 保留）。
 #
 # 用户数据保护（P0）：.budget/ 与 ~/.budgetbuddy/ 默认保留（opencode 形态
 # 仅删其中的管理面产物，用户数据文件保留），--purge 显式删除。
@@ -130,7 +137,25 @@ _budget_uninstall_install_root() {
         echo "$HOME/.budgetbuddy"
         return 0
     fi
+    if [[ "$kind" == "codex" ]]; then
+        # 管理面根（A3：与 opencode/claudecode 共享 ~/.budgetbuddy/；平台结构在 .codex/）
+        echo "$HOME/.budgetbuddy"
+        return 0
+    fi
     echo ""
+    return 0
+}
+
+_budget_uninstall_codex_struct_root() {
+    # codex 平台结构根（.codex/ 或 ~/.codex/）：按 SCOPE/ROOT 定位（区别于
+    # claudecode 的 BUDGET_AGENTS_DIR 父目录回溯——codex 的 agents 素材在
+    # skill 深层目录 skills/budget-workflow/agents/，回溯得 skill 目录而非
+    # 平台根）。stdout 输出根路径。
+    if [[ "${BUDGET_PLATFORM_SCOPE:-}" == "project" && -n "${BUDGET_PLATFORM_ROOT:-}" ]]; then
+        echo "$BUDGET_PLATFORM_ROOT/.codex"
+    else
+        echo "$HOME/.codex"
+    fi
     return 0
 }
 
@@ -252,28 +277,64 @@ PYEOF
     echo "$result"
 }
 
+_budget_uninstall_codex_skill_installed() {
+    # codex 结构特征探测（同 platform.sh 探测签名）：目录名限定
+    # budget-workflow + SKILL.md 存在双条件（防同名目录误判）。
+    local dir="$1"
+    [[ -f "$dir/SKILL.md" ]]
+}
+
 _budget_uninstall_other_platform_installed() {
     # 用法: _budget_uninstall_other_platform_installed <platform_kind>
     # 无本地清单形态（source 部署/直接拷贝）的保守探测：他平台结构目录存在
-    # 本套件 agent 即视为共装（管理面 ~/.budgetbuddy/ 共享，删除需保守）。
+    # 本套件安装特征即视为共装（管理面 ~/.budgetbuddy/ 共享，删除需保守）。
     # codebuddy 管理面独立（.codebuddy/ 同根），不参与该判定。
+    # codex 对称（add-codex-platform D4）：codex 视角探测 opencode/claudecode
+    # 的 agent 目录；opencode/claudecode 视角探测 codex skill 目录签名。
     local kind="$1"
-    local -a probes=()
     local oc_global="$HOME/.config/opencode/agent"
     local cc_global="$HOME/.claude/agents"
     local oc_local="${BUDGET_PLATFORM_ROOT:-}/.opencode/agent"
     local cc_local="${BUDGET_PLATFORM_ROOT:-}/.claude/agents"
-    case "$kind" in
-        claudecode) probes=("$oc_global" "$oc_local") ;;
-        opencode)   probes=("$cc_global" "$cc_local") ;;
-        *)          return 1 ;;
-    esac
+    local cx_global="$HOME/.codex/skills/budget-workflow"
+    local cx_local="${BUDGET_PLATFORM_ROOT:-}/.codex/skills/budget-workflow"
     local dir
-    for dir in "${probes[@]}"; do
-        if _budget_has_suite_agents "$dir"; then
-            return 0
-        fi
-    done
+    case "$kind" in
+        claudecode)
+            for dir in "$oc_global" "$oc_local"; do
+                if _budget_has_suite_agents "$dir"; then
+                    return 0
+                fi
+            done
+            for dir in "$cx_global" "$cx_local"; do
+                if _budget_uninstall_codex_skill_installed "$dir"; then
+                    return 0
+                fi
+            done
+            ;;
+        opencode)
+            for dir in "$cc_global" "$cc_local"; do
+                if _budget_has_suite_agents "$dir"; then
+                    return 0
+                fi
+            done
+            for dir in "$cx_global" "$cx_local"; do
+                if _budget_uninstall_codex_skill_installed "$dir"; then
+                    return 0
+                fi
+            done
+            ;;
+        codex)
+            for dir in "$oc_global" "$oc_local" "$cc_global" "$cc_local"; do
+                if _budget_has_suite_agents "$dir"; then
+                    return 0
+                fi
+            done
+            ;;
+        *)
+            return 1
+            ;;
+    esac
     return 1
 }
 
@@ -282,10 +343,11 @@ _budget_uninstall_shared_mgmt_guard() {
     # 管理面共享保护判定（D4 保守策略）：返回 0 = 需保护（跳过管理面删除——
     # files 段 + 管理面已知结构枚举 + setup.sh/清单/包装器/rc fallback）。
     # 判定：本地清单 platform_files 段含他平台条目，或（无清单形态）他平台
-    # 结构目录存在本套件 agent。仅 opencode/claudecode 参与共享管理面。
+    # 结构目录存在本套件安装特征。仅 opencode/claudecode/codex 参与共享管理面。
     local install_root="$1"
     local platform_kind="$2"
-    if [[ "$platform_kind" != "opencode" && "$platform_kind" != "claudecode" ]]; then
+    if [[ "$platform_kind" != "opencode" && "$platform_kind" != "claudecode" \
+          && "$platform_kind" != "codex" ]]; then
         return 1
     fi
     if [[ -n "$install_root" && -f "$install_root/.budget-manifest.json" ]] \
@@ -439,8 +501,9 @@ _budget_uninstall_collect_opencode_platform() {
 _budget_uninstall_collect_claudecode_platform() {
     # claudecode 平台结构目录（~/.claude/ 或 <root>/.claude/）下本套件产物
     # 枚举：agents/{10 名单}.md、commands/budget|opsx 组目录、skills/ 的
-    # budget-*/openspec-* 前缀（复数目录，区别于 opencode 单数 agent/command/skill；
-    # 与 codebuddy 同构但组目录整体删除范围不同——claudecode 组目录即套件专属）。
+    # budget-*/openspec-* 前缀、hooks/budget-notify-hook.py（复数目录，
+    # 区别于 opencode 单数 agent/command/skill；与 codebuddy 同构但组目录
+    # 整体删除范围不同——claudecode 组目录即套件专属）。
     # CLAUDE.md 标记区块清理独立处理（不删文件）。
     local agents_dir="${BUDGET_AGENTS_DIR:-}"
     if [[ -z "$agents_dir" || ! -d "$agents_dir" ]]; then
@@ -461,6 +524,28 @@ _budget_uninstall_collect_claudecode_platform() {
             echo "$path"
         fi
     done
+    for path in "$struct_root"/skills/budget-* "$struct_root"/skills/openspec-*; do
+        if [[ -e "$path" ]]; then
+            echo "$path"
+        fi
+    done
+    if [[ -f "$struct_root/hooks/budget-notify-hook.py" ]]; then
+        echo "$struct_root/hooks/budget-notify-hook.py"
+    fi
+    return 0
+}
+
+# ─── 内部辅助：codex 平台结构收集（stdout 绝对路径行）────────────────────
+
+_budget_uninstall_collect_codex_platform() {
+    # codex 平台结构目录（~/.codex/ 或 <root>/.codex/）下本套件产物枚举：
+    # skills/ 的 budget-*/openspec-* 前缀 6 个 skill 目录（结构前缀 skills/，
+    # 复用 claudecode 模式；skill 目录整体删除，内含 agents/commands/rules
+    # 素材随目录清除）。config.toml multi_agent 键清理与 AGENTS.md 区块清理
+    # 独立处理（不删文件）。
+    local struct_root
+    struct_root="$(_budget_uninstall_codex_struct_root)"
+    local path
     for path in "$struct_root"/skills/budget-* "$struct_root"/skills/openspec-*; do
         if [[ -e "$path" ]]; then
             echo "$path"
@@ -576,6 +661,19 @@ _budget_uninstall_plan() {
                         done || true
                 fi
             fi
+            if [[ "$platform_kind" == "codex" ]]; then
+                # platform_files codex: 前缀段（路径相对 .codex/ 结构根，
+                # 按 SCOPE/ROOT 定位；解析失败兜底同上，退化为已知结构删除）
+                local cx_struct_root=""
+                cx_struct_root="$(_budget_uninstall_codex_struct_root)"
+                _budget_uninstall_manifest_platform_entries \
+                    "$install_root/.budget-manifest.json" "codex" \
+                    | while IFS= read -r rel; do
+                        if [[ -n "$rel" ]]; then
+                            echo "$cx_struct_root/$rel"
+                        fi
+                    done || true
+            fi
         fi
         if [[ "$platform_kind" == "codebuddy" && -n "$install_root" ]]; then
             _budget_uninstall_collect_codebuddy "$install_root"
@@ -590,6 +688,12 @@ _budget_uninstall_plan() {
                 # 管理面已知结构枚举与 opencode 同集（lib/docs/models/personas/
                 # setup.sh，A3 共享 ~/.budgetbuddy/；setup-notes.md 为 opencode
                 # 独有，仅存在时命中，无害）
+                _budget_uninstall_collect_opencode_mgmt
+            fi
+        elif [[ "$platform_kind" == "codex" ]]; then
+            _budget_uninstall_collect_codex_platform
+            if [[ "$shared_guard" != "true" ]]; then
+                # 管理面已知结构枚举与 opencode 同集（A3 共享 ~/.budgetbuddy/）
                 _budget_uninstall_collect_opencode_mgmt
             fi
         fi
@@ -681,6 +785,106 @@ _budget_uninstall_clean_agents_md() {
     return 0
 }
 
+# ─── 内部辅助：codex config.toml multi_agent 键清理（文本级对称反向）────
+
+_budget_uninstall_clean_codex_config() {
+    # 用法: _budget_uninstall_clean_codex_config <config_file>
+    # install.sh inject_codex_config 的对称反向（add-codex-platform D4）：
+    # [features] 段内仅删 multi_agent 本键（用户其他键逐行保留）；段空
+    # （删键后无有效内容行——键值与注释均无）则连段头一起删除；段头行首
+    # 精确匹配（防 [features.xxx] 子串误判）。区块外用户配置零触碰；临时
+    # 文件 + 原子 rename；失败降级告警（不阻断卸载主流程）。
+    local config_file="$1"
+    if [[ -z "$config_file" || ! -f "$config_file" ]]; then
+        return 0
+    fi
+    local status=""
+    status="$(BUDGET_CONFIG_FILE="$config_file" "${BUDGET_PYTHON:-python3}" << 'PYEOF'
+import os
+import re
+import sys
+import tempfile
+
+SECTION_RE = re.compile(r'^\[features\][ \t]*(?:#.*)?$')
+SECTION_ANY_RE = re.compile(r'^\[')
+KEY_ANY_RE = re.compile(r'^multi_agent\s*=')
+
+path = os.environ['BUDGET_CONFIG_FILE']
+try:
+    with open(path, encoding='utf-8') as handle:
+        content = handle.read()
+except (OSError, UnicodeDecodeError) as exc:
+    print('config.toml 读取失败: %s' % exc, file=sys.stderr)
+    sys.exit(1)
+
+lines = content.split('\n')
+
+# 定位 [features] 段（行首精确；段界 = 下一个段头行或 EOF）
+section_idx = -1
+for idx, line in enumerate(lines):
+    if SECTION_RE.match(line):
+        section_idx = idx
+        break
+if section_idx < 0:
+    print('noop')
+    sys.exit(0)
+
+end_idx = len(lines)
+for idx in range(section_idx + 1, len(lines)):
+    if SECTION_ANY_RE.match(lines[idx]):
+        end_idx = idx
+        break
+
+# 段内仅删 multi_agent 本键（用户其他键保留）
+body = lines[section_idx + 1:end_idx]
+kept = [line for line in body if not KEY_ANY_RE.match(line)]
+if len(kept) == len(body):
+    print('noop')
+    sys.exit(0)
+
+# 段空判定：删键后无有效内容行（键值/注释均无）→ 连段头一起删段
+has_content = any(line.strip() and not line.strip().startswith('#')
+                  for line in kept)
+if has_content:
+    new_lines = lines[:section_idx + 1] + kept + lines[end_idx:]
+else:
+    new_lines = lines[:section_idx] + lines[end_idx:]
+
+try:
+    dir_name = os.path.dirname(path) or '.'
+    fd, tmp_path = tempfile.mkstemp(prefix='.codex-config-', suffix='.tmp',
+                                    dir=dir_name)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as tmp:
+            tmp.write('\n'.join(new_lines))
+        os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+except Exception as exc:
+    print('config.toml 写入失败: %s' % exc, file=sys.stderr)
+    sys.exit(1)
+print('cleaned')
+sys.exit(0)
+PYEOF
+    )" || status=""
+    case "$status" in
+        cleaned)
+            budget_print_success "已清理 config.toml 的 multi_agent 键（用户其他配置保留）: $config_file"
+            ;;
+        noop)
+            budget_print_info "config.toml 无 multi_agent 键，跳过清理: $config_file"
+            ;;
+        *)
+            budget_print_warning "config.toml multi_agent 键清理失败（可手动检查）: $config_file"
+            ;;
+    esac
+    return 0
+}
+
 # ─── 内部辅助：rc 文件 budget() fallback 函数块清理 ──────────────────────
 
 _budget_uninstall_clean_rc() {
@@ -753,10 +957,21 @@ _budget_uninstall_execute() {
         manifest_file="$install_root/.budget-manifest.json"
     fi
 
-    # 1) settings.json hooks 清理（codebuddy 形态；先于文件删除——hooks
-    #    引擎 lib/hooks_inject.py 在删除计划内，删除后清理必然引擎缺失）
+    # 1) settings.json hooks 清理（codebuddy/claudecode 形态；先于文件删除——
+    #    hooks 引擎 lib/hooks_inject.py 在删除计划内，删除后清理必然引擎缺失。
+    #    claudecode 的 settings.json（.claude/settings.json 项目级 /
+    #    ~/.claude/settings.json 全局）独立于共享管理面，共装 guard 下仍清理）
     if [[ "$platform_kind" == "codebuddy" && -n "$install_root" ]]; then
         _budget_uninstall_clean_settings "$install_root/settings.json"
+    fi
+    if [[ "$platform_kind" == "claudecode" ]]; then
+        local cc_settings=""
+        if [[ "${BUDGET_PLATFORM_SCOPE:-}" == "project" && -n "${BUDGET_PLATFORM_ROOT:-}" ]]; then
+            cc_settings="$BUDGET_PLATFORM_ROOT/.claude/settings.json"
+        else
+            cc_settings="$HOME/.claude/settings.json"
+        fi
+        _budget_uninstall_clean_settings "$cc_settings"
     fi
 
     # 2) 删除计划（manifest + 已知结构；幂等：不存在项已被过滤）
@@ -797,6 +1012,20 @@ _budget_uninstall_execute() {
         fi
         _budget_uninstall_clean_agents_md "$claude_md" "CLAUDE.md"
     fi
+    if [[ "$platform_kind" == "codex" ]]; then
+        # config.toml multi_agent 键清理（段内仅删本键，段空删段；用户其他
+        # 配置零触碰）+ AGENTS.md 标记区块清理（项目根或 ~/.codex/AGENTS.md）
+        local cx_struct_root=""
+        cx_struct_root="$(_budget_uninstall_codex_struct_root)"
+        _budget_uninstall_clean_codex_config "$cx_struct_root/config.toml"
+        local cx_agents_md=""
+        if [[ "${BUDGET_PLATFORM_SCOPE:-}" == "project" && -n "${BUDGET_PLATFORM_ROOT:-}" ]]; then
+            cx_agents_md="$BUDGET_PLATFORM_ROOT/AGENTS.md"
+        else
+            cx_agents_md="$HOME/.codex/AGENTS.md"
+        fi
+        _budget_uninstall_clean_agents_md "$cx_agents_md"
+    fi
 
     # 4) 空目录清理（套件管理目录；rmdir 只删空目录）
     if [[ -n "$install_root" && "$shared_guard" != "true" ]]; then
@@ -816,11 +1045,20 @@ _budget_uninstall_execute() {
         local struct_root
         struct_root="$(dirname "$BUDGET_AGENTS_DIR")"
         local d
-        for d in agents commands/budget commands/opsx commands skills; do
+        for d in agents commands/budget commands/opsx commands skills hooks; do
             if [[ -d "$struct_root/$d" ]] && rmdir "$struct_root/$d" 2>/dev/null; then
                 budget_print_info "已删除空目录: $struct_root/$d"
             fi
         done
+    fi
+    if [[ "$platform_kind" == "codex" ]]; then
+        # 空目录清理（skills/ 下 6 个 skill 目录已随删除计划整体移除；
+        # rmdir 只删空目录，用户自建 skill 目录保留时 skills/ 保留）
+        local cx_root
+        cx_root="$(_budget_uninstall_codex_struct_root)"
+        if [[ -d "$cx_root/skills" ]] && rmdir "$cx_root/skills" 2>/dev/null; then
+            budget_print_info "已删除空目录: $cx_root/skills"
+        fi
     fi
 
     # 5) 用户数据处理（P0：默认保留 .budget/ 与 ~/.budgetbuddy/）

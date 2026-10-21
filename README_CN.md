@@ -16,6 +16,7 @@ BudgetBuddy 是一套多 Agent 省钱研发工作流。它把每个任务路由�
 - **五阶段工作流** — 方案设计 → 方案双审 → 分级实现 → 复审与回归 → 归档；阶段不可跳过
 - **模型三档预设** — `economic` / `balanced` / `quality`，一条命令切换；支持按 agent 的 `custom` 覆写与 `inherit`（继承主面板模型）
 - **5 套 persona 主题** — default（专业）、tech-legends、sanguo、shuihu、genshin；角色名与称呼随主题切换
+- **执行类 agent 免审批（AutoRun）** — 4 个执行类 sub-agent（coder-lite / coder-standard / coder-senior / tester）默认开启 AutoRun（工具调用免逐条审批）；其余 agent 可用 `budget setup autorun` 管理
 - **通用 webhook 通知** — 企微机器人 / 钉钉机器人（HMAC-SHA256 加签）/ 飞书机器人（卡片）/ 自定义 webhook，11 个工作流事件开关（N1–N11）
 - **Coder Guard 护栏** — 按 coder × 任务标签记录最近 5 次成败；失败 ≥2 次自动触发分级降级
 - **Goal Loop** — 目标驱动宏循环：定义目标 → 跑 pipeline → 验证 → 未达标则迭代（最多 8 轮，含安全边界）
@@ -59,7 +60,7 @@ bash install.sh
 
 - **CodeBuddy**：agents/rules/skills/commands 落入 `.codebuddy/`；hooks 注入 `settings.json`（注入前备份）并自动启用 Superpowers 插件；`budget` CLI 写入 `~/.local/bin/budget`。
 - **OpenCode**：agents/commands/skills 落入 OpenCode 目录；rules 以标记区块形式合并进 `AGENTS.md`；hooks 无原生等价物——插件扩展点见 `core/docs/opencode-setup-notes.md`。
-- **Claude Code**：agents/commands/skills 落入 `.claude/`（项目级）或 `~/.claude/`（全局）；rules 以标记区块形式合并进 `CLAUDE.md`（项目根或 `~/.claude/CLAUDE.md`）；管理面与 OpenCode 共享 `~/.budgetbuddy/`；hooks 首发不注入——通知经 `budget notify` CLI 降级提供。
+- **Claude Code**：agents/commands/skills 落入 `.claude/`（项目级）或 `~/.claude/`（全局）；rules 以标记区块形式合并进 `CLAUDE.md`（项目根或 `~/.claude/CLAUDE.md`）；管理面与 OpenCode 共享 `~/.budgetbuddy/`；hooks 三事件通知已支持（Notification / PermissionRequest / SubagentStop）。
 - Windows：请使用 Git Bash 或 WSL（PowerShell 会把 `curl` 别名为 `Invoke-WebRequest`）。
 - 项目级与全局级安装可共存；项目级优先。
 
@@ -83,7 +84,7 @@ bash install.sh
 /budget:start "新增用户登录 API，JWT 鉴权"
 ```
 
-项目级安装将 agents/commands/skills 落入 `.claude/`，rules 以标记区块合并进 `CLAUDE.md`；全局安装落入 `~/.claude/`（对应 `~/.claude/CLAUDE.md`）。⚠️ Claude Code 首发不支持 hooks 通知——请改用 `budget notify "<消息>" <事件名>` 发送通知。
+项目级安装将 agents/commands/skills 落入 `.claude/`，rules 以标记区块合并进 `CLAUDE.md`；全局安装落入 `~/.claude/`（对应 `~/.claude/CLAUDE.md`）。Claude Code 已支持 hooks 三事件通知（Notification / PermissionRequest / SubagentStop）；`budget notify "<消息>" <事件名>` 仍可用于显式发送。
 
 Leader 会分析需求，依次调度 architect → 双 reviewer → 分级 coder → tester → 复审 → recorder，最后汇报结果。目标驱动迭代：
 
@@ -218,6 +219,35 @@ budget setup show                     # 查看结果
 
 完整目录（模型、档位、成本、别名、三平台预设表）在构建期生成到 `dist/<platform>/docs/MODEL_SELECTION.md`。
 
+## 执行类 agent 免审批（AutoRun）
+
+CodeBuddy 平台上，4 个执行类 sub-agent **默认开启 AutoRun**——其工具调用不再逐条弹审批框（「允许一次」仍为 IDE 弹窗既有能力）：
+
+- **默认开启**：`coder-lite` / `coder-standard` / `coder-senior` / `tester`
+- **保留逐条确认**：architect、reviewer + reviewer-b、recorder、director、goal-evaluator——可用 `budget setup autorun` 自行开启
+
+```bash
+budget setup autorun list                 # 状态查看：全局选择清单 + 当前安装态实况
+budget setup autorun on reviewer          # 为单个 agent 开启 AutoRun
+budget setup autorun off coder-lite       # 为单个 agent 关闭 AutoRun
+```
+
+- **`list` 双栏读法**：左栏为全局选择清单（`~/.budgetbuddy/auto-run.json`），右栏为当前安装态逐 agent 实况（`enabledAutoRun` 实际值）；状态文件存在后经 IDE 设置页的手动变更会如实暴露两栏差异。
+- **多项目级安装**：`on`/`off` 的补丁只落**当前探测到的安装态**，选择则记录进唯一的全局状态文件——**多项目需逐项目各执行一次** `on`/`off`，差异用 `list` 双栏核对。
+- `apply` 为安装重放与状态修复用的内部命令，不面向用户日常使用。
+
+> ⚠️ **安全须知**：AutoRun 使该 agent 权限范围内**所有**工具调用免人工审批——审批是最后一道人工闸门。默认开启的 4 个执行类 agent `bash_allow: ["*"]`，即可**无审批执行任意 shell 命令**（`rm -rf`、`git push -f` 均命中 `*`）。对 git 类 agent（architect / recorder / reviewer / reviewer-b，`bash_allow: ["git *"]`）开启后可无审批执行 `git push --force`、`git clean -fd`、`git checkout -- .` 等高危 git 命令。请确认知情后再开启。
+
+**持久化说明**：autorun 选择持久化于用户数据目录 `~/.budgetbuddy/auto-run.json`，卸载不清除，重装后经安装重放恢复。`budget setup update` 不触碰 agent 文件与状态文件——其完成汇总的「用户数据: 已保留」口径涵盖 `auto-run.json`。
+
+### 平台差异
+
+| 平台 | AutoRun 机制 |
+|------|-------------|
+| CodeBuddy | 子代理 frontmatter `enabledAutoRun: true`；4 个执行类 agent 默认开启；其余 6 个经 `budget setup autorun` 管理 |
+| OpenCode | 无需 auto-run 字段——permission map（`ask`/`allow`/`deny`）已等效：`allow` 即免审批；4 个执行类 agent 的既有权限映射已等价 |
+| Claude Code | 无每子代理 auto-run 开关；审批由会话权限模式 / `settings.json` permissions 承担——`budget setup autorun` 输出替代指引并 exit 0，不做任何改动 |
+
 ## 消息通知
 
 在 `.budget/notify.json`（项目级）或 `~/.budgetbuddy/notify.json`（全局级）配置一次即可；项目级存在即生效（不合并）：
@@ -241,7 +271,7 @@ budget setup show                     # 查看结果
 - **11 个事件开关（N1–N11）** — 设计评审驳回、审查升级耗尽、循环超限、Director 介入、阶段流转、目标达成等
 - **投递语义** — markdown 消息体、每渠道 5 秒超时、任一成功即停、全部失败静默（绝不阻断工作流）
 - **安全** — 配置文件 `chmod 600`（仅 owner 可读）；webhook/secret 不经环境变量、命令行参数与日志传递；错误输出仅含脱敏后的主机名
-- **Claude Code** — hooks 通知首发不支持（不注入 hooks）；请通过 `budget notify "<消息>" <事件名>` 显式发送通知
+- **Claude Code** — hooks 三事件通知已支持（Notification / PermissionRequest / SubagentStop）；`budget notify "<消息>" <事件名>` 仍可用于显式发送通知
 
 ## 目录结构
 

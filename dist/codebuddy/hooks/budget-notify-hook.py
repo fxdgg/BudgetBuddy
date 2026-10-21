@@ -2,9 +2,12 @@
 # -*- coding: utf-8 -*-
 """BudgetBuddy Hook 通知引擎 — stdin JSON → markdown 消息 → notify.py。
 
-由 lib/hooks.sh 注入 CodeBuddy settings.json（Notification / PreToolUse /
-SubagentStop 三事件；注入前备份 settings.json.bak-budget，写入采用
-临时文件 + 原子 rename）。空/非法 JSON 静默退出；通知失败不阻塞 hook。
+由 lib/hooks.sh 注入各平台 settings.json（codebuddy：Notification /
+PreToolUse / SubagentStop；claudecode：Notification（message 直通）/
+PermissionRequest / SubagentStop；注入前备份 settings.json.bak-budget，
+写入采用临时文件 + 原子 rename）。引擎 payload 驱动、平台无关（design.md
+D1）：无法识别的字段/事件静默跳过。空/非法 JSON 静默退出；通知失败不
+阻塞 hook。
 """
 
 from __future__ import annotations
@@ -35,7 +38,12 @@ def _wrap_message(title: str, body: str) -> str:
 
 
 def _build_notification_message(payload: dict, project: str) -> str | None:
-    """Notification 事件：权限确认卡点与空闲等待两类通知。"""
+    """Notification 事件：权限确认卡点、空闲等待与会话提醒（message 直通）。
+
+    payload 驱动兼容（design.md D1）：notification_type 存在 → codebuddy
+    两分支；缺失但 message 非空 → Claude Code 会话提醒直通（权限等待/
+    空闲提醒均以 message 直载，平台中性文案）；两者皆无 → None。
+    """
     notification_type = payload.get('notification_type', '')
     if notification_type == 'permission_prompt':
         title = '🤖 流程卡点，需要您确认'
@@ -43,13 +51,49 @@ def _build_notification_message(payload: dict, project: str) -> str | None:
         body = (
             f'> **项目**：`{project}`\n'
             f'> **详情**：{detail}\n\n'
-            '请在 CodeBuddy 中确认操作'
+            '请在当前会话中确认操作'
         )
     elif notification_type == 'idle_prompt':
         title = '⏳ 等待您的输入'
         body = f'> **项目**：`{project}`\n\n已空闲超过 60 秒，请回到对话继续'
+    elif not notification_type and str(payload.get('message', '')):
+        title = '🤖 会话提醒'
+        detail = str(payload.get('message', ''))[:200]
+        body = (
+            f'> **项目**：`{project}`\n'
+            f'> **详情**：{detail}\n\n'
+            '请回到当前会话查看'
+        )
     else:
         return None
+    return _wrap_message(title, body)
+
+
+def _build_permissionrequest_message(payload: dict, project: str) -> str:
+    """PermissionRequest 事件：权限确认卡点通知（Claude Code 形态）。
+
+    正文优先 message、次 tool_name/tool_input 摘要；字段全缺失时输出
+    通用卡点文案而非返回 None（卡点漏通知违背通知初衷，design.md D1）。
+    """
+    title = '🤖 流程卡点，需要您确认'
+    message = str(payload.get('message', '') or '')
+    tool_name = str(payload.get('tool_name', '') or '')
+    tool_input = payload.get('tool_input')
+    if message:
+        detail = message[:200]
+    elif tool_name:
+        detail = f'工具 `{tool_name}` 请求确认'
+        if isinstance(tool_input, dict):
+            command = str(tool_input.get('command', '') or '')[:200]
+            if command:
+                detail = f'工具 `{tool_name}`：`{command}`'
+    else:
+        detail = '收到权限确认请求'
+    body = (
+        f'> **项目**：`{project}`\n'
+        f'> **详情**：{detail}\n\n'
+        '请在当前会话中确认操作'
+    )
     return _wrap_message(title, body)
 
 
@@ -65,7 +109,7 @@ def _build_pretooluse_message(payload: dict, project: str) -> str | None:
     body = (
         f'> **项目**：`{project}`\n'
         f'> **命令**：`{command}`\n\n'
-        '此命令将在沙箱外执行，请在 CodeBuddy 中确认操作'
+        '此命令将在沙箱外执行，请在当前会话中确认操作'
     )
     return _wrap_message(title, body)
 
@@ -86,6 +130,8 @@ def build_message(payload: dict) -> str | None:
     project = os.path.basename(cwd) if isinstance(cwd, str) and cwd else 'unknown'
     if event == 'Notification':
         return _build_notification_message(payload, project)
+    if event == 'PermissionRequest':
+        return _build_permissionrequest_message(payload, project)
     if event == 'PreToolUse':
         return _build_pretooluse_message(payload, project)
     if event == 'SubagentStop':

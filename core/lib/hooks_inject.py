@@ -3,8 +3,15 @@
 """BudgetBuddy settings.json hooks 注入引擎（design.md §9/§12-A11；specs/notify R5）。
 
 由 lib/hooks.sh 编排调用（参数一律经环境变量传递，不经命令行）：
-  SETTINGS_FILE - CodeBuddy settings.json 路径
-  HOOK_CMD      - hook 命令串（含 budget-notify-hook.py 实际路径）
+  SETTINGS_FILE     - CodeBuddy settings.json 路径
+  HOOK_CMD          - hook 命令串（含 budget-notify-hook.py 实际路径）
+  HOOK_EVENTS_JSON  - 可选注入事件清单（design.md D2，JSON 数组，每项
+                      {"event": "<事件名>", "matchers": ["<matcher>", ...]}）；
+                      仅 inject_hooks / inject_all 两个注入 action 消费——
+                      未传时沿用模块常量（codebuddy 默认三事件，行为字节级
+                      不变）；remove_hooks（marker 驱动全事件扫描）与
+                      check_hooks（存在性判定）不消费该变量。非法 JSON →
+                      stderr 报错 exit 1，不执行任何写回。
 
 Actions（ACTION 环境变量）：
   check              - 查询 superpowers 插件启用状态（stdout: true/false）
@@ -37,12 +44,14 @@ SUPERPOWERS_KEY = 'superpowers@codebuddy-plugins-official'
 BACKUP_SUFFIX = '.bak-budget'
 HOOK_TIMEOUT_SECONDS = 10
 
-# 三事件注入形态（design.md §9）：
-#   Notification - permission_prompt / idle_prompt 两 matcher
-#   PreToolUse   - Bash matcher（沙箱越权命令通知）
-#   SubagentStop - 无 matcher（子代理完成通知）
-NOTIFICATION_MATCHERS = ('permission_prompt', 'idle_prompt')
-PRETOOLUSE_MATCHER = 'Bash'
+# 默认注入事件清单（HOOK_EVENTS_JSON 未传时的 codebuddy 缺省，design.md D2），
+# 即 codebuddy 默认三事件（Notification/PreToolUse/SubagentStop，design.md §9）：
+# (event, matchers) 序列；matchers 为空 → 注入无 matcher 条目（同 SubagentStop 形态）
+DEFAULT_EVENT_MANIFEST = (
+    ('Notification', ('permission_prompt', 'idle_prompt')),
+    ('PreToolUse', ('Bash',)),
+    ('SubagentStop', ()),
+)
 
 
 def _out(line: str) -> None:
@@ -67,6 +76,44 @@ def _require_hook_cmd() -> str:
         _fail('HOOK_CMD 环境变量未设置')
         sys.exit(1)
     return hook_cmd
+
+
+def _load_event_manifest():
+    """读取 HOOK_EVENTS_JSON 注入事件清单（design.md D2）。
+
+    返回 (event, matchers) 元组列表；未设置/空白 → None（沿用
+    DEFAULT_EVENT_MANIFEST，codebuddy 行为不变）。清单结构非法
+    （非 JSON / 非数组 / 条目非对象 / event 非非空字符串 / matchers
+    非字符串数组）→ stderr 报错 exit 1（在任何读写操作前触发，
+    settings.json 不受影响）。
+    """
+    raw = os.environ.get('HOOK_EVENTS_JSON', '').strip()
+    if not raw:
+        return None
+    try:
+        manifest = json.loads(raw)
+    except ValueError as exc:
+        _fail(f'HOOK_EVENTS_JSON 非法 JSON（{type(exc).__name__}；未执行任何写入）')
+        sys.exit(1)
+    if not isinstance(manifest, list):
+        _fail('HOOK_EVENTS_JSON 必须为 JSON 数组（未执行任何写入）')
+        sys.exit(1)
+    spec = []
+    for item in manifest:
+        if not isinstance(item, dict):
+            _fail('HOOK_EVENTS_JSON 条目必须是对象（未执行任何写入）')
+            sys.exit(1)
+        event = item.get('event')
+        matchers = item.get('matchers')
+        if not isinstance(event, str) or not event:
+            _fail('HOOK_EVENTS_JSON 条目 event 必须为非空字符串（未执行任何写入）')
+            sys.exit(1)
+        if not isinstance(matchers, list) \
+                or not all(isinstance(matcher, str) and matcher for matcher in matchers):
+            _fail(f'HOOK_EVENTS_JSON 条目 {event} 的 matchers 必须为非空字符串数组（未执行任何写入）')
+            sys.exit(1)
+        spec.append((event, tuple(matchers)))
+    return spec
 
 
 def _dump(data: dict) -> str:
@@ -233,26 +280,31 @@ def _command_entry(hook_cmd: str) -> dict:
     return {'type': 'command', 'command': hook_cmd, 'timeout': HOOK_TIMEOUT_SECONDS}
 
 
-def _inject_hook_entries(data: dict, hook_cmd: str) -> bool:
-    """注入三事件 hooks（事件级幂等：该事件已有本套件条目则跳过该事件）。"""
+def _inject_hook_entries(data: dict, hook_cmd: str, event_spec=None) -> bool:
+    """注入事件 hooks（事件级幂等：该事件已有本套件条目则跳过该事件）。
+
+    event_spec 为 (event, matchers) 序列（HOOK_EVENTS_JSON 清单展开）；
+    None 时使用 DEFAULT_EVENT_MANIFEST（codebuddy 默认三事件，行为不变）。
+    matchers 非空 → 逐 matcher 注入条目；为空 → 注入无 matcher 条目
+    （同现有 SubagentStop 形态）。
+    """
+    if event_spec is None:
+        event_spec = DEFAULT_EVENT_MANIFEST
     if not isinstance(data.get('hooks'), dict) and 'hooks' in data:
         return False  # hooks 节点被用户写成非对象 → 不动（不破坏用户结构）
     changed = False
-    if not _event_has_suite(data, 'Notification'):
-        for matcher_name in NOTIFICATION_MATCHERS:
-            _append_matcher(data, 'Notification', {
-                'matcher': matcher_name, 'hooks': [_command_entry(hook_cmd)],
+    for event_name, matchers in event_spec:
+        if _event_has_suite(data, event_name):
+            continue
+        if matchers:
+            for matcher_name in matchers:
+                _append_matcher(data, event_name, {
+                    'matcher': matcher_name, 'hooks': [_command_entry(hook_cmd)],
+                })
+        else:
+            _append_matcher(data, event_name, {
+                'hooks': [_command_entry(hook_cmd)],
             })
-        changed = True
-    if not _event_has_suite(data, 'PreToolUse'):
-        _append_matcher(data, 'PreToolUse', {
-            'matcher': PRETOOLUSE_MATCHER, 'hooks': [_command_entry(hook_cmd)],
-        })
-        changed = True
-    if not _event_has_suite(data, 'SubagentStop'):
-        _append_matcher(data, 'SubagentStop', {
-            'hooks': [_command_entry(hook_cmd)],
-        })
         changed = True
     return changed
 
@@ -352,14 +404,15 @@ def _write_injection(path: str, data: dict, changed: bool) -> None:
 
 
 def action_inject_all() -> None:
-    """superpowers 插件 + 三事件 hooks 一次注入（单次读改写，备份只落一次）。"""
+    """superpowers 插件 + 事件 hooks 一次注入（单次读改写，备份只落一次）。"""
     path = _settings_path()
     hook_cmd = _require_hook_cmd()
+    event_spec = _load_event_manifest()  # 清单校验先于 settings 读取（非法即退出不写回）
     data, _ = _load_settings(path)
     if data is None:
         data = {}
     changed = _inject_superpowers_entry(data)
-    changed = _inject_hook_entries(data, hook_cmd) or changed
+    changed = _inject_hook_entries(data, hook_cmd, event_spec) or changed
     _write_injection(path, data, changed)
 
 
@@ -373,13 +426,14 @@ def action_inject_superpowers() -> None:
 
 
 def action_inject_hooks() -> None:
-    """仅注入三事件 hooks。"""
+    """仅注入事件 hooks（HOOK_EVENTS_JSON 清单或默认三事件）。"""
     path = _settings_path()
     hook_cmd = _require_hook_cmd()
+    event_spec = _load_event_manifest()  # 清单校验先于 settings 读取（非法即退出不写回）
     data, _ = _load_settings(path)
     if data is None:
         data = {}
-    _write_injection(path, data, _inject_hook_entries(data, hook_cmd))
+    _write_injection(path, data, _inject_hook_entries(data, hook_cmd, event_spec))
 
 
 def action_remove_hooks() -> None:

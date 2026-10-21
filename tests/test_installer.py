@@ -20,11 +20,21 @@ dist/），HOME 环境隔离（剥离外层 BUDGET_* 变量）。覆盖：
   本平台段、无后缀 platform_files 仅取无冒号键，对既有安装升级模拟）、
   local_manifest_other_platform 共装判定（opencode 视角带前缀键=他平台 /
   claudecode 视角无冒号键=他平台 / 清单缺失=0）
+- 复审 F1/F2/F3：codebuddy→claudecode 共装与 all 模式下两平台
+  settings.json 三事件互不串写（claudecode 注入不依赖探测）；注入失败
+  降级警告不阻断安装、SUMMARY 如实呈现
 - 升级差集清理：本地旧清单 − 新 manifest 差集删除、清单外文件不受影响
 - 非交互：BUDGET_PLATFORM / BUDGET_GLOBAL 环境变量、无 tty 默认项目安装、
   both 双平台
 - 依赖缺失 mock（PATH 隔离，python3 不可用 → 明确报错中止）
 - bash -n 语法冒烟与 CLI 入口（--help / --version）
+- agent-autorun install.sh 集成面（design.md D4/D5、installer spec 2.5 重放
+  钩子）：钩子落点（upgrade_diff_cleanup 后、write_local_manifest 前；状态
+  文件存在时 apply 被调用且 reviewer 的 enabledAutoRun 恢复）、无状态文件
+  不重放（dist 默认 4 个在位）、损坏状态文件 apply 失败仅告警不阻断且安装
+  完成与状态文件字节不变、二次安装 apply 幂等（无状态/默认一致时同步全
+  跳过；非默认状态下同步先以 dist 重覆盖偏差 agent 再由 apply 重放，终态
+  一致、字节稳定）
 """
 
 import hashlib
@@ -41,6 +51,7 @@ INSTALL_SH = REPO_ROOT / 'install.sh'
 DIST_CODEBUDDY = REPO_ROOT / 'dist' / 'codebuddy'
 DIST_OPENCODE = REPO_ROOT / 'dist' / 'opencode'
 DIST_CLAUDECODE = REPO_ROOT / 'dist' / 'claudecode'
+DIST_CODEX = REPO_ROOT / 'dist' / 'codex'
 
 SUITE_AGENTS = (
     'architect', 'coder-lite', 'coder-standard', 'coder-senior', 'reviewer',
@@ -74,13 +85,14 @@ def count_files(root):
 
 
 def make_mini_repo(base):
-    """构造 mini 仓库：install.sh + dist/ 三平台副本（可自由改动模拟升级）。"""
+    """构造 mini 仓库：install.sh + dist/ 四平台副本（可自由改动模拟升级）。"""
     repo = base / 'repo'
     repo.mkdir()
     shutil.copy2(INSTALL_SH, repo / 'install.sh')
     shutil.copytree(DIST_CODEBUDDY, repo / 'dist' / 'codebuddy')
     shutil.copytree(DIST_OPENCODE, repo / 'dist' / 'opencode')
     shutil.copytree(DIST_CLAUDECODE, repo / 'dist' / 'claudecode')
+    shutil.copytree(DIST_CODEX, repo / 'dist' / 'codex')
     return repo
 
 
@@ -532,8 +544,16 @@ class ClaudecodeProjectTests(InstallerSandbox):
         self.assertTrue((cc / 'skills' / 'budget-workflow' / 'SKILL.md').is_file())
         # CLAUDE.fragment.md 不复制为文件（合并进 CLAUDE.md）
         self.assertFalse((cc / 'CLAUDE.fragment.md').exists())
-        # hooks 不注入（routing.hook 空串，settings.json 不生成）
-        self.assertFalse((cc / 'settings.json').exists())
+        # hooks 分发 + settings.json 三事件注入（v0.2.1 起，无 superpowers）
+        self.assertTrue((cc / 'hooks' / 'budget-notify-hook.py').is_file())
+        settings = cc / 'settings.json'
+        self.assertTrue(settings.is_file(), 'settings.json 未生成')
+        settings_data = load_json(settings)
+        hooks = settings_data.get('hooks', {})
+        for event in ('Notification', 'PermissionRequest', 'SubagentStop'):
+            self.assertIn(event, hooks, '缺失注入事件: %s' % event)
+        self.assertIn('budget-notify-hook.py', settings.read_text(encoding='utf-8'))
+        self.assertNotIn('enabledPlugins', settings_data)
         # 管理面统一 ~/.budgetbuddy/（与 opencode 共享）
         mgmt = self.home / '.budgetbuddy'
         self.assertTrue((mgmt / 'setup.sh').is_file())
@@ -556,7 +576,7 @@ class ClaudecodeProjectTests(InstallerSandbox):
         local = load_json(self.home / '.budgetbuddy' / '.budget-manifest.json')
         dist = load_json(self.repo / 'dist' / 'claudecode' / '.manifest.json')
         struct, mgmt = split_manifest_entries(
-            dist['files'], ('agents', 'commands', 'skills'))
+            dist['files'], ('agents', 'commands', 'skills', 'hooks'))
         # files 字段 = 管理面条目（相对 ~/.budgetbuddy/，哈希与 dist 一致）
         self.assertEqual(local['files'],
                          {rel: dist['files'][rel] for rel in sorted(mgmt)})
@@ -600,6 +620,89 @@ class ClaudecodeProjectTests(InstallerSandbox):
         self.assertIn('跳过 %d' % total, result.stdout)
 
 
+class CoInstallHooksTests(InstallerSandbox):
+    """复审 F1/F2/F3：codebuddy/claudecode 共装 hooks 注入互不串写。
+
+    F1 复现场景：codebuddy 先装（.codebuddy/setup.sh 就位，all 模式必现）
+    后再装 claudecode——修复前 inject_hooks_claudecode 子进程内
+    detect_platform 探测命中 codebuddy，注入错写到 .codebuddy/settings.json
+    且 .claude/settings.json 不生成（安装器仍报「hooks 注入完成」假成功）。
+    """
+
+    CC_EVENTS = ('Notification', 'PermissionRequest', 'SubagentStop')
+    CB_EVENTS = ('Notification', 'PreToolUse', 'SubagentStop')
+
+    def _assert_claudecode_settings(self):
+        """claudecode settings：本平台三事件，无 codebuddy 事件/插件键。"""
+        path = self.work / '.claude' / 'settings.json'
+        self.assertTrue(path.is_file(), 'claudecode settings.json 未生成')
+        settings = load_json(path)
+        hooks = settings.get('hooks', {})
+        for event in self.CC_EVENTS:
+            self.assertIn(event, hooks, 'claudecode 缺失注入事件: %s' % event)
+        # 互不串写：不含 codebuddy 独有事件与 superpowers 插件键
+        self.assertNotIn('PreToolUse', hooks)
+        self.assertNotIn('enabledPlugins', settings)
+        self.assertIn('budget-notify-hook.py', path.read_text(encoding='utf-8'))
+
+    def _assert_codebuddy_settings(self):
+        """codebuddy settings：本平台三事件 + superpowers，无 claudecode 事件。"""
+        path = self.work / '.codebuddy' / 'settings.json'
+        self.assertTrue(path.is_file(), 'codebuddy settings.json 未生成')
+        settings = load_json(path)
+        hooks = settings.get('hooks', {})
+        for event in self.CB_EVENTS:
+            self.assertIn(event, hooks, 'codebuddy 缺失注入事件: %s' % event)
+        # 互不串写：不含 claudecode 独有事件
+        self.assertNotIn('PermissionRequest', hooks)
+        self.assertIn('superpowers@codebuddy-plugins-official',
+                      settings.get('enabledPlugins', {}))
+
+    def test_codebuddy_then_claudecode_no_crosswrite(self):
+        """F1：codebuddy → claudecode 顺序两装，两 settings 各含本平台
+        三事件、互不串写；安装摘要如实指向 .claude/settings.json。"""
+        result = self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'codebuddy', 'BUDGET_GLOBAL': '0'})
+        self.assert_install_ok(result)
+        result = self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'claudecode', 'BUDGET_GLOBAL': '0'})
+        self.assert_install_ok(result)
+        self._assert_claudecode_settings()
+        self._assert_codebuddy_settings()
+        # SUMMARY 真实：hooks 行指向 .claude/settings.json 且报注入完成
+        self.assertIn('.claude/settings.json', result.stdout)
+        self.assertIn('hooks 注入完成', result.stdout)
+
+    def test_all_mode_settings_per_platform(self):
+        """all 模式（cb/oc/cc 顺序三装）：两 settings 各含本平台三事件
+        （互不串写），opencode 无 settings 注入（无 hooks 机制）。"""
+        result = self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'all', 'BUDGET_GLOBAL': '0'})
+        self.assert_install_ok(result)
+        self._assert_claudecode_settings()
+        self._assert_codebuddy_settings()
+        self.assertFalse((self.work / '.opencode' / 'settings.json').exists())
+        self.assertIn('hooks 注入完成', result.stdout)
+
+    def test_inject_failure_degrades_to_warning(self):
+        """F2：注入失败（settings.json 路径被占位目录阻断原子写）→
+        安装不阻断（rc 0）、降级警告文案、SUMMARY 如实呈现注入失败。"""
+        # 占位目录：引擎对 settings.json 的原子写（os.replace 到目录）必然
+        # 失败 → 子进程回传 INJECT_RESULT=failed（修复前 exit 0 假成功）
+        (self.work / '.claude').mkdir()
+        (self.work / '.claude' / 'settings.json').mkdir()
+        result = self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'claudecode', 'BUDGET_GLOBAL': '0'})
+        self.assert_install_ok(result)
+        self.assertIn('hooks 注入失败', result.stdout)
+        self.assertNotIn('hooks 注入完成', result.stdout)
+        # SUMMARY 如实呈现失败（不再输出落点行假成功）
+        self.assertIn('注入失败（可运行 budget setup init 补全）', result.stdout)
+        self.assertNotIn(
+            '%s/settings.json（Notification' % (self.work / '.claude'),
+            result.stdout)
+
+
 class CoInstallManifestTests(InstallerSandbox):
     """复审 C1-①：write_local_manifest 合并写（多平台共装两段并存）。"""
 
@@ -626,7 +729,7 @@ class CoInstallManifestTests(InstallerSandbox):
         oc_struct, oc_mgmt = split_manifest_entries(
             oc_dist['files'], ('agent', 'command', 'skill'))
         cc_struct, cc_mgmt = split_manifest_entries(
-            cc_dist['files'], ('agents', 'commands', 'skills'))
+            cc_dist['files'], ('agents', 'commands', 'skills', 'hooks'))
         # opencode 段：无前缀键（历史格式，后装不覆盖先装）
         self.assertEqual(
             {k for k in local['platform_files'] if ':' not in k}, oc_struct)
@@ -839,6 +942,209 @@ class UpgradeTests(InstallerSandbox):
         # AGENTS.md 合并幂等（无重复区块）
         text = (self.work / 'AGENTS.md').read_text(encoding='utf-8')
         self.assertEqual(1, text.count(AGENTS_BEGIN))
+
+
+class AutoRunReplayTests(InstallerSandbox):
+    """agent-autorun install.sh 集成面（design.md D4/D5、installer spec 2.5 钩子）。
+
+    复用既有 harness（mini 仓库 + dist 副本 + HOME 隔离沙盒）subprocess 驱动
+    install.sh 端到端，覆盖 installer spec 的 4 个 MUST 场景：
+
+    ① 钩子落点：upgrade_diff_cleanup 之后、write_local_manifest 之前
+       （stdout 消息顺序佐证；codebuddy 模式 write_local_manifest 照抄 dist
+       清单哈希，落点只能以消息顺序 + apply 实效双重佐证）；状态文件存在时
+       apply 被调用且 reviewer 的 enabledAutoRun 恢复；
+    ② 无状态文件不重放（dist 默认 4 个在位）；
+    ③ 损坏状态文件 apply 失败仅告警不阻断、安装完成与状态文件字节不变；
+    ④ 二次安装 apply 幂等（无状态/默认一致时同步全跳过；非默认状态下同步
+       先以 dist 重覆盖偏差 agent 再由 apply 重放，终态一致、字节稳定）。
+    """
+
+    # dist 构建产物默认开启 AutoRun 的 4 个执行类 agent（Task 1.1）
+    DEFAULT_ON = ('coder-lite', 'coder-senior', 'coder-standard', 'tester')
+    # 清单外（默认关闭）agent
+    DEFAULT_OFF = ('architect', 'director', 'goal-evaluator', 'recorder',
+                   'reviewer-b')
+
+    def install_codebuddy(self):
+        result = self.run_install(
+            env_extra={'BUDGET_PLATFORM': 'codebuddy', 'BUDGET_GLOBAL': '0'})
+        self.assert_install_ok(result)
+        return result
+
+    def _state_path(self):
+        return self.home / '.budgetbuddy' / 'auto-run.json'
+
+    def _write_state(self, agents):
+        """写状态文件（与 autorun.write_state_file 同序列化口径）。"""
+        content = json.dumps(
+            {'agents': sorted(set(agents))}, indent=2, sort_keys=True) + '\n'
+        self._state_path().parent.mkdir(parents=True, exist_ok=True)
+        self._state_path().write_bytes(content.encode('utf-8'))
+
+    def _agents_dir(self):
+        return self.work / '.codebuddy' / 'agents'
+
+    def _dist_agents_dir(self):
+        return self.repo / 'dist' / 'codebuddy' / 'agents'
+
+    def _agent_path(self, name):
+        return self._agents_dir() / (name + '.md')
+
+    def _agent_bytes(self, name):
+        return self._agent_path(name).read_bytes()
+
+    def _agent_has_autorun(self, name):
+        return 'enabledAutoRun: true' in self._agent_path(name).read_text(
+            encoding='utf-8')
+
+    def _assert_agents_match_dist(self):
+        """断言 agents 目录 10 个 .md 与 mini 仓库 dist 逐字节一致（无补丁漂移）。"""
+        for name in SUITE_AGENTS:
+            self.assertEqual(
+                self._agent_bytes(name),
+                (self._dist_agents_dir() / (name + '.md')).read_bytes(), name)
+
+    def _drop_from_dist(self, rel):
+        """从 mini 仓库 dist 清单与磁盘移除一个产物文件（模拟新版下线）。"""
+        manifest_path = self.repo / 'dist' / 'codebuddy' / '.manifest.json'
+        manifest = load_json(manifest_path)
+        del manifest['files'][rel]
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True), encoding='utf-8')
+        (self.repo / 'dist' / 'codebuddy' / rel).unlink()
+
+    def _assert_replay_outcome(self):
+        """apply 重放终态：清单内开启（默认 4 + reviewer）、清单外无行。
+
+        按实际安装集断言（升级路径下被 dist 下线的 agent 已不在场）。
+        """
+        installed = {path.stem for path in self._agents_dir().glob('*.md')}
+        for name in self.DEFAULT_ON + ('reviewer',):
+            if name in installed:
+                self.assertTrue(self._agent_has_autorun(name), '%s 未开启' % name)
+        for name in self.DEFAULT_OFF:
+            if name in installed:
+                self.assertFalse(self._agent_has_autorun(name), '%s 误开启' % name)
+
+    # ── ① 钩子落点 ─────────────────────────────────────────────────────────
+
+    def test_replay_hook_restores_reviewer(self):
+        """状态文件存在（用户曾 on reviewer）→ apply 被调用、reviewer 恢复；
+        钩子落点于 sync 之后、write_local_manifest 之前（stdout 消息顺序）。"""
+        self._write_state(self.DEFAULT_ON + ('reviewer',))
+        result = self.install_codebuddy()
+        self.assertIn('AutoRun 状态重放完成', result.stdout)
+        # reviewer 的 enabledAutoRun 恢复（dist 默认无该行，唯 apply 可写回）
+        self._assert_replay_outcome()
+        # 落点佐证：文件同步完成 < 状态重放完成 < 本地清单写入
+        stdout = result.stdout
+        self.assertIn('文件同步完成', stdout)
+        self.assertIn('本地安装清单已写入', stdout)
+        self.assertLess(
+            stdout.index('文件同步完成'),
+            stdout.index('AutoRun 状态重放完成'))
+        self.assertLess(
+            stdout.index('AutoRun 状态重放完成'),
+            stdout.index('本地安装清单已写入'))
+
+    def test_replay_hook_after_cleanup_before_manifest(self):
+        """落点佐证（升级路径）：差集清理先于重放——dist 下线的 agent 已删，
+        apply 视角其未安装（告警跳过）；消息顺序 同步 < 清理 < 重放 < 清单。"""
+        # 先装一版（10 agent 全集），再从 dist 下线 reviewer-b 触发差集清理
+        self.install_codebuddy()
+        self._drop_from_dist('agents/reviewer-b.md')
+        # 状态清单含已下线的 reviewer-b（apply 应告警跳过而非失败）
+        self._write_state(self.DEFAULT_ON + ('reviewer', 'reviewer-b'))
+        result = self.install_codebuddy()
+        self.assert_install_ok(result)
+        # 清理先于重放：stale 文件已删 + apply 未见该 agent
+        self.assertFalse(self._agent_path('reviewer-b').exists())
+        self.assertIn('未安装（跳过）: reviewer-b', result.stderr)
+        # 消息顺序：同步 < 差集清理 < 状态重放 < 清单写入
+        stdout = result.stdout
+        self.assertIn('差集清理', stdout)
+        self.assertLess(stdout.index('文件同步完成'), stdout.index('差集清理'))
+        self.assertLess(
+            stdout.index('差集清理'), stdout.index('AutoRun 状态重放完成'))
+        self.assertLess(
+            stdout.index('AutoRun 状态重放完成'),
+            stdout.index('本地安装清单已写入'))
+        # 重放对在场 agent 照常完成
+        self._assert_replay_outcome()
+
+    # ── ② 无状态文件不重放 ─────────────────────────────────────────────────
+
+    def test_no_state_file_skips_replay(self):
+        """无状态文件 → 不重放：无重放消息、dist 默认 4 个在位、不创建状态
+        文件、安装态与 dist 逐字节一致（无 apply 补丁漂移）。"""
+        result = self.install_codebuddy()
+        self.assertNotIn('AutoRun 状态重放', result.stdout)
+        for name in self.DEFAULT_ON:
+            self.assertTrue(self._agent_has_autorun(name), name)
+        for name in self.DEFAULT_OFF + ('reviewer',):
+            self.assertFalse(self._agent_has_autorun(name), name)
+        self.assertFalse(self._state_path().exists())
+        self._assert_agents_match_dist()
+
+    # ── ③ 损坏状态文件仅告警不阻断 ─────────────────────────────────────────
+
+    def test_corrupt_state_warns_without_blocking(self):
+        """状态文件损坏 → apply 失败仅告警不阻断：安装完成（rc 0 + 清单写入）、
+        告警文案、状态文件字节不变；apply 中止于损坏校验，agent 保持 dist 默认态。"""
+        raw = '{ 这不是合法 JSON'
+        self._state_path().parent.mkdir(parents=True, exist_ok=True)
+        self._state_path().write_bytes(raw.encode('utf-8'))
+        result = self.install_codebuddy()
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('AutoRun 状态重放失败', result.stdout)
+        self.assertNotIn('AutoRun 状态重放完成', result.stdout)
+        self.assertIn('本地安装清单已写入', result.stdout)
+        # 状态文件字节不变（绝不覆盖写）
+        self.assertEqual(self._state_path().read_bytes(), raw.encode('utf-8'))
+        # agent 文件保持 dist 默认态（apply 未触碰任何文件）
+        self._assert_agents_match_dist()
+
+    # ── ④ 二次安装 apply 幂等 ──────────────────────────────────────────────
+
+    def test_reinstall_without_state_all_skipped(self):
+        """无状态/默认一致：二次安装同步全跳过、不重放、字节稳定。"""
+        self.install_codebuddy()
+        dist = load_json(self.repo / 'dist' / 'codebuddy' / '.manifest.json')
+        total = len(dist['files'])
+        first_bytes = {name: self._agent_bytes(name) for name in SUITE_AGENTS}
+        result = self.install_codebuddy()
+        self.assertIn('新增 0 / 更新 0 / 跳过 %d' % total, result.stdout)
+        self.assertNotIn('AutoRun 状态重放', result.stdout)
+        self.assertFalse(self._state_path().exists())
+        for name in SUITE_AGENTS:
+            self.assertEqual(self._agent_bytes(name), first_bytes[name], name)
+
+    def test_reinstall_with_state_replay_idempotent(self):
+        """非默认状态（默认 4 + reviewer）：首次安装 apply 补放后，模拟用户/IDE
+        偏差改写 reviewer.md，二次安装同步先以 dist 重覆盖偏差 agent（更新 1）、
+        再由 apply 重放，终态与首次补放后逐字节一致；三次安装字节稳定。"""
+        self._write_state(self.DEFAULT_ON + ('reviewer',))
+        self.install_codebuddy()
+        first_bytes = {name: self._agent_bytes(name) for name in SUITE_AGENTS}
+        self._assert_replay_outcome()
+        # 模拟偏差：reviewer.md 被追加用户内容（脱离 dist 与补丁态）
+        reviewer_path = self._agent_path('reviewer')
+        reviewer_path.write_bytes(
+            reviewer_path.read_bytes() + b'\n<!-- user edit -->\n')
+        # 二次安装：同步重覆盖偏差 agent → apply 重放
+        result = self.install_codebuddy()
+        self.assertIn('更新 1', result.stdout)
+        self.assertIn('AutoRun 状态重放完成', result.stdout)
+        self._assert_replay_outcome()
+        # 终态一致：与首次安装补放后逐字节相同（偏差被抹平）
+        for name in SUITE_AGENTS:
+            self.assertEqual(self._agent_bytes(name), first_bytes[name], name)
+        # 三次安装：同步重覆盖 → apply 重放循环，字节稳定
+        result = self.install_codebuddy()
+        self.assertIn('AutoRun 状态重放完成', result.stdout)
+        for name in SUITE_AGENTS:
+            self.assertEqual(self._agent_bytes(name), first_bytes[name], name)
 
 
 if __name__ == '__main__':

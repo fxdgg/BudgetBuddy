@@ -7,7 +7,8 @@
 1. 解析 core/platform/<platform>.yaml（手写 YAML 子集解析器，§12-A5）并校验 DSL schema（§3.5）；
 2. 构建写入临时目录 dist/<platform>.new/，逐类别转换：agents/commands frontmatter
    重写（§3.1/§3.2）、正文变量替换（§3.3）、routing 落位（§3.5）、
-   lib/models/personas/docs 处理、rules 合并（opencode AGENTS.fragment.md）；
+   lib/models/personas/docs 处理、rules 合并（extra_outputs 声明：
+   agents_fragment 全文合并 / rules_index 轻量索引 + 可选全文副本）；
 3. 写 .manifest.json（§12-A7：按键排序、无时间戳、不含自身）；
 4. 全部成功后原子替换 dist/<platform>/（失败清理 .new，旧产物保持原样）。
 
@@ -81,19 +82,24 @@ BODY_VARIABLES_WHITELIST = frozenset((
     'TASK_TOOL', 'SKILL_NS', 'PROJECT_DOC', 'AGENT_DIR', 'GUARD_PATH', 'RULES_DIR',
 ))
 
-# §3.5 agent_frontmatter.emit 合法表达式精确集合（七表达式：{name}/{description}/
-# {resolved_model}/{tools|pascal}/{permission_mode}/{permission_map}/{max_turns}，
+# §3.5 agent_frontmatter.emit 合法表达式精确集合（八表达式：{name}/{description}/
+# {resolved_model}/{tools|pascal}/{permission_mode}/{permission_map}/{max_turns}/{auto_run}，
 # 无裸 {tools}）；形如 {xxx} 或 {xxx|pascal} 的整体表达式必须 ∈ 本集合，
 # 防 yaml 演进期拼写错误或 routing 占位符混入 emit 域后静默进入产物。
 EMIT_EXPRESSIONS = frozenset((
     'name', 'description', 'resolved_model', 'tools|pascal',
-    'permission_mode', 'permission_map', 'max_turns',
+    'permission_mode', 'permission_map', 'max_turns', 'auto_run',
 ))
 
 # §3.5 routing 模板占位符集合（{name}=主名、{skill}=skill 目录名、
 # {group}=命令组、{path}=相对路径）；routing 域字符串模板与 hook/docs
 # 目标路径中出现的 {xxx} 必须全部 ∈ 本集合（防拼写错误静默落位字面量路径）。
 ROUTING_PLACEHOLDERS = frozenset(('name', 'skill', 'group', 'path'))
+
+# extra_outputs kind 合法枚举（§3.5/D2）：agents_fragment=rules 全文合并单文件
+# （opencode 形态）；rules_index=轻量索引 + 可选 copy_dest 全文副本（codex 形态，
+# AGENTS.md 32KiB 截断约束下全文不进索引）。有序 tuple 保证报错文案确定性。
+EXTRA_OUTPUT_KINDS = ('agents_fragment', 'rules_index')
 
 # §3.5 DSL 顶层必填字段。
 DSL_TOP_REQUIRED = (
@@ -616,7 +622,8 @@ def _iter_routing_path_fields(routing: dict, dsl: dict) -> Iterator[tuple[str, s
     """遍历全部路由路径类字段，逐一产出 (字段名, 值)。
 
     覆盖（§3.5 路径模板统一防逃逸）：routing 八类字符串模板值（含可选 hook）、
-    routing.docs 的目标路径（null 不分发，跳过）、extra_outputs 的 dest/source。
+    routing.docs 的目标路径（null 不分发，跳过）、extra_outputs 的 dest/source
+    与 rules_index 的 copy_dest（可空=仅索引无副本，非字符串跳过）。
     """
     for key in ROUTING_STRING_KEYS:
         yield f'routing.{key}', routing[key]
@@ -626,7 +633,7 @@ def _iter_routing_path_fields(routing: dict, dsl: dict) -> Iterator[tuple[str, s
         if dest is not None:
             yield f'routing.docs[{src}]', dest
     for i, spec in enumerate(dsl.get('extra_outputs', [])):
-        for key in ('dest', 'source'):
+        for key in ('dest', 'source', 'copy_dest'):
             if isinstance(spec.get(key), str):
                 yield f'extra_outputs[{i}].{key}', spec[key]
 
@@ -705,17 +712,39 @@ def validate_dsl(dsl: object, path: str) -> dict:
             for key in ('kind', 'source', 'dest'):
                 if not isinstance(spec.get(key), str) or not spec[key]:
                     raise BuildError(f'{path}: extra_outputs[{i}] 缺少非空字符串字段 {key}')
-            if spec.get('kind') == 'agents_fragment':
-                # routing.rule 与合并目标一致性（防 DSL 漂移）。
+            kind = spec['kind']
+            if kind in EXTRA_OUTPUT_KINDS:
+                # routing.rule 与合并/索引目标一致性（防 DSL 漂移；两类 fragment
+                # kind 同规则——routing.rule 即 fragment 落位点）。
                 if routing.get('rule') != spec.get('dest'):
                     raise BuildError(
                         f'{path}: routing.rule（{routing.get("rule")}）与 extra_outputs '
-                        f'agents_fragment dest（{spec.get("dest")}）不一致')
+                        f'{kind} dest（{spec.get("dest")}）不一致')
     # 路径模板统一防逃逸 + 占位符域校验（结构校验通过后执行）：全部路由值
     # 拒绝 .. 片段与绝对路径；{xxx} 占位符必须 ∈ ROUTING_PLACEHOLDERS。
     for field, value in _iter_routing_path_fields(routing, dsl):
         _check_path_value(value, field, path)
         _check_routing_placeholders(value, field, path)
+    # kind 枚举校验（置于路径校验之后：防逃逸属安全性校验，优先于 kind 拼写类
+    # 报错；未知 kind 报错列出全部合法 kind，两类枚举见 EXTRA_OUTPUT_KINDS）。
+    for i, spec in enumerate(dsl.get('extra_outputs', [])):
+        kind = spec['kind']
+        if kind not in EXTRA_OUTPUT_KINDS:
+            raise BuildError(
+                f'{path}: extra_outputs[{i}] kind（{kind}）不合法'
+                f'（合法 kind: {list(EXTRA_OUTPUT_KINDS)}）')
+        if 'copy_dest' in spec:
+            # copy_dest 仅 rules_index 支持（全文副本目录）；可空（省略/null
+            # = 仅生成轻量索引，不分发全文副本）。
+            if kind != 'rules_index':
+                raise BuildError(
+                    f'{path}: extra_outputs[{i}] copy_dest 仅 rules_index kind 支持'
+                    f'（当前 kind: {kind}）')
+            copy_dest = spec['copy_dest']
+            if copy_dest is not None and (not isinstance(copy_dest, str) or not copy_dest):
+                raise BuildError(
+                    f'{path}: extra_outputs[{i}] copy_dest 必须是非空字符串'
+                    '或省略/null（仅索引无副本）')
     return dsl
 
 
@@ -799,6 +828,9 @@ def validate_agent(fm: dict, body: str, name: str, path: str, roles: list[str] |
         max_turns = fm['max_turns']
         if not isinstance(max_turns, int) or isinstance(max_turns, bool) or max_turns <= 0:
             raise BuildError(f'{path}: max_turns 必须是正整数')
+    # auto_run 可选布尔（D1）：存在时须为 bool，拒绝字符串/整数形态。
+    if 'auto_run' in fm and not isinstance(fm['auto_run'], bool):
+        raise BuildError(f'{path}: auto_run 必须是布尔值（true/false）')
     if not body.strip():
         raise BuildError(f'{path}: frontmatter 之后必须有非空正文')
 
@@ -896,6 +928,10 @@ def rewrite_agent(fm: dict, body: str, dsl: dict, platform: str,
             # 仅源存在时输出（§3.5 emit 表约定）。
             if 'max_turns' in fm:
                 out[out_key] = fm['max_turns']
+        elif expr == '{auto_run}':
+            # 仅源存在时输出布尔值（D1：缺省不声明免审批，_dump_scalar 渲染 true/false）。
+            if 'auto_run' in fm:
+                out[out_key] = fm['auto_run']
         else:
             out[out_key] = expr  # 字面量（如 subagent）
     return dump_frontmatter(out) + body
@@ -1414,6 +1450,33 @@ def _build_agents(core_dir: Path, dist_dir: Path, dsl: dict, platform: str,
                 f'缺失 {missing} / 多余 {extra}')
 
 
+def _build_agent_bash_patterns(core_dir: Path, dist_dir: Path, dsl: dict) -> None:
+    """构建免审批 bash 模式数据文件（design.md D7）：仅映射 {auto_run} 的平台生成。
+
+    从 core/agents/*.md frontmatter 读 permissions.bash_allow（缺省按
+    _permission_lists 口径 ["*"]），写 <dist_dir>/<routing.agent 父目录>/
+    .bash-patterns.json（{"agents": {"<name>": {"bash_allow": [...]}}}，键排序、
+    indent 2、末尾换行，与 .manifest.json 同风格），供运行时 autorun 安全知情
+    提示取数（零硬编码权限表，core/agents 变更后重建即同步）。opencode/claudecode
+    不映射 {auto_run}，门控不命中故不生成（两平台产物逐字节不变）。
+    """
+    emit = dsl['agent_frontmatter']['emit']
+    if '{auto_run}' not in emit.values():
+        return  # 未映射 AutoRun 的平台（opencode/claudecode）不生成。
+    agents_dir = core_dir / 'agents'
+    out_dir = dist_dir / Path(route_path(dsl['routing']['agent'], {'name': '_'})).parent
+    agents: dict[str, dict] = {}
+    for src in _iter_files(agents_dir, suffix='.md'):
+        rel = src.relative_to(core_dir.parent).as_posix()
+        fm, _ = load_frontmatter(_read_text(src, rel), rel)
+        _, bash_allow = _permission_lists(fm, rel)
+        agents[fm['name']] = {'bash_allow': bash_allow}
+    if not agents:
+        return  # core/agents 为空（§4 降级场景）不生成空数据文件。
+    payload = json.dumps({'agents': agents}, indent=2, sort_keys=True, ensure_ascii=False)
+    _write_text(out_dir / '.bash-patterns.json', payload)
+
+
 def _build_commands(core_dir: Path, dist_dir: Path, dsl: dict) -> None:
     """转换 commands：§3.1 命令校验 → frontmatter 重写 → 变量替换 → routing 落位。"""
     commands_dir = core_dir / 'commands'
@@ -1466,15 +1529,25 @@ def _build_skills(core_dir: Path, dist_dir: Path, dsl: dict) -> None:
                 _copy_file(src, dest_base / rel)
 
 
-def _has_agents_fragment(dsl: dict) -> bool:
-    """判断 DSL 是否声明 agents_fragment 合并产物（opencode 形态）。"""
-    return any(spec.get('kind') == 'agents_fragment' for spec in dsl.get('extra_outputs', []))
+def _has_fragment_output(dsl: dict) -> bool:
+    """判断 DSL 是否声明 fragment 类 extra_outputs（agents_fragment 全文合并 /
+    rules_index 轻量索引）。
+
+    两类 kind 均抑制 _build_rules 逐文件落位：rules 全文改经 extra_outputs
+    管线输出（合并单文件或 copy_dest 副本），防止 routing.rule 指向 fragment
+    dest 时 12 条规则逐文件覆盖写同一目标（D2 联动改造，原 _has_agents_fragment
+    仅判定 agents_fragment 的语义扩展）。
+    """
+    return any(
+        spec.get('kind') in EXTRA_OUTPUT_KINDS
+        for spec in dsl.get('extra_outputs', []))
 
 
 def _build_rules(core_dir: Path, dist_dir: Path, dsl: dict) -> None:
-    """转换 rules：codebuddy 逐文件落位改名；opencode 由 extra_outputs 合并处理。"""
-    if _has_agents_fragment(dsl):
-        return  # rules 走 AGENTS.fragment 合并管线（extra_outputs）。
+    """转换 rules：codebuddy 逐文件落位改名；fragment 类平台（agents_fragment/
+    rules_index）由 extra_outputs 管线处理，跳过逐文件落位。"""
+    if _has_fragment_output(dsl):
+        return  # rules 走 extra_outputs 管线（全文合并或轻量索引 + 副本）。
     rules_dir = core_dir / 'rules'
     template = dsl['routing']['rule']
     body_variables = dsl['body_variables']
@@ -1566,12 +1639,14 @@ def _render_doc_template(src: Path, dest_rel: str, dist_dir: Path,
 
 
 def _build_extra_outputs(core_dir: Path, dist_dir: Path, dsl: dict) -> None:
-    """生成平台附加产物（opencode AGENTS.fragment.md 合并声明）。"""
+    """生成平台附加产物：agents_fragment 全文合并（opencode）与 rules_index
+    轻量索引 + 可选全文副本（codex，design D2/D3 单次遍历双输出）。"""
     body_variables = dsl['body_variables']
     for i, spec in enumerate(dsl.get('extra_outputs', [])):
         kind = spec['kind']
-        if kind != 'agents_fragment':
-            raise BuildError(f'extra_outputs[{i}]: 不支持的 kind {kind}')
+        if kind not in EXTRA_OUTPUT_KINDS:
+            raise BuildError(
+                f'extra_outputs[{i}]: 不支持的 kind {kind}（合法: {list(EXTRA_OUTPUT_KINDS)}）')
         source = spec['source']
         category = source.split('/', 1)[0] if '/' in source else source
         if source != f'{category}/**':
@@ -1579,10 +1654,104 @@ def _build_extra_outputs(core_dir: Path, dist_dir: Path, dsl: dict) -> None:
         markers = spec.get('markers')
         if not isinstance(markers, list) or len(markers) != 2:
             raise BuildError(f'extra_outputs[{i}]: markers 必须是 [begin, end] 两个标记')
-        rule_files = _iter_files(core_dir / category, suffix='.md')
-        fragment = merge_rules_fragment(rule_files, markers)
-        fragment = replace_variables(fragment, body_variables, spec['dest'])
-        _write_text(dist_dir / spec['dest'], fragment)
+        source_dir = core_dir / category
+        rule_files = _iter_files(source_dir, suffix='.md')
+        if kind == 'agents_fragment':
+            fragment = merge_rules_fragment(rule_files, markers)
+            fragment = replace_variables(fragment, body_variables, spec['dest'])
+            _write_text(dist_dir / spec['dest'], fragment)
+        else:
+            _build_rules_index(rule_files, source_dir, dist_dir, body_variables, i, spec, markers)
+
+
+def _build_rules_index(rule_files: list[Path], source_dir: Path, dist_dir: Path,
+                       body_variables: dict, index: int, spec: dict,
+                       markers: list[str]) -> None:
+    """rules_index 双输出（design D3）：dest 轻量索引 + copy_dest 全文副本目录。
+
+    副本逐文件经 replace_variables 六变量替换（同 agents_fragment 的 fragment
+    处理惯例），保持源相对结构落位；copy_dest 省略/null 时仅生成索引。
+    """
+    copy_dest = spec.get('copy_dest')
+    index_text = build_rules_index(rule_files, source_dir, copy_dest, markers, body_variables)
+    _write_text(dist_dir / spec['dest'], index_text)
+    if not copy_dest:
+        return
+    for rule_file in rule_files:
+        rel = rule_file.relative_to(source_dir).as_posix()
+        text = replace_variables(_read_text(rule_file, str(rule_file)), body_variables,
+                                 f'{copy_dest}/{rel}')
+        _write_text(dist_dir / copy_dest / rel, text)
+
+
+# rules_index 轻量索引常量（design D2/D3）：描述一句话截断（UTF-8 字节上限，
+# 首个句读分隔符前短句优先）与指引段文案（按 codex 形态固定——现阶段唯一
+# 消费方；安装根为 codex 项目级/全局两级形态）。索引体积约束 < 1KiB
+# （12 条规则实测约 0.9KiB，远低于 AGENTS.md 32KiB 截断上限），截断保证
+# 规则描述增长时索引体积不失控。
+_RULES_INDEX_DESC_MAX_BYTES = 36
+_RULES_INDEX_DESC_SEPARATORS = '。；，;,'
+
+_RULES_INDEX_TITLE = '# BudgetBuddy 规则索引'
+_RULES_INDEX_GUIDANCE = (
+    'Codex AGENTS.md 有 32KiB 截断上限，规则全文不在此合并；按需读取以下规则文件'
+)
+_RULES_INDEX_ROOTS_NOTE = '项目级安装根 .codex/，全局安装根 ~/.codex/'
+
+
+def _rules_index_desc(fm: dict, body_variables: dict, label: str) -> str:
+    """提取规则 frontmatter description 为索引一句话描述。
+
+    先做模板变量替换（描述含 {{TASK_TOOL}} 等变量时按平台值展开，同
+    agents_fragment 惯例），再取首个句读分隔符前短句，最后按字节上限截断
+    （不切断多字节字符，超限追加 …）；缺失/非字符串返回空串（清单行仅文件名）。
+    """
+    desc = fm.get('description')
+    if not isinstance(desc, str):
+        return ''
+    desc = replace_variables(' '.join(desc.split()), body_variables, label)
+    if not desc:
+        return ''
+    positions = [pos for pos in (desc.find(sep) for sep in _RULES_INDEX_DESC_SEPARATORS)
+                 if pos > 0]
+    if positions:
+        desc = desc[:min(positions)]
+    total = 0
+    for idx, ch in enumerate(desc):
+        width = len(ch.encode('utf-8'))
+        if total + width > _RULES_INDEX_DESC_MAX_BYTES:
+            return desc[:idx].rstrip() + '…'
+        total += width
+    return desc
+
+
+def build_rules_index(rule_files: list[Path], source_dir: Path, copy_dest: str | None,
+                      markers: list[str], body_variables: dict) -> str:
+    """生成规则轻量索引 fragment（design D2/D3）：外层 markers 包裹 + 标题 +
+    按需读取指引（32KiB 截断说明 + 项目级/全局安装根 + 全文目录）+ 一行式
+    规则清单（文件名 + 描述一句话）。
+
+    规则全文不进索引（体积约束，全文经 copy_dest 副本按需读取）；清单行只写
+    文件名，目录前缀上提到指引段——12 条 × 逐行完整路径 + 描述的形态经字节
+    预算证明必然超出 1KiB（仅路径部分即约 0.9KiB），常量目录前缀上提不损失
+    信息（安装根 + 全文目录 + 文件名即可定位全文副本）。
+    """
+    begin, end = markers
+    guidance = _RULES_INDEX_GUIDANCE
+    if copy_dest:
+        guidance += f'（{_RULES_INDEX_ROOTS_NOTE}，全文目录 {copy_dest}/）'
+    lines = [begin, '', _RULES_INDEX_TITLE, '', guidance + '。', '']
+    for rule_file in rule_files:
+        rel = rule_file.relative_to(source_dir).as_posix()
+        fm, _ = load_frontmatter(_read_text(rule_file, str(rule_file)), str(rule_file))
+        desc = _rules_index_desc(fm, body_variables, rel)
+        entry = f'- {rel}'
+        if desc:
+            entry += f' — {desc}'
+        lines.append(entry)
+    lines.append('')
+    lines.append(end)
+    return '\n'.join(lines) + '\n'
 
 
 def merge_rules_fragment(rule_files: list[Path], markers: list[str]) -> str:
@@ -1652,6 +1821,7 @@ def _build_all(core_dir: Path, dist_dir: Path, dsl: dict, platform: str) -> None
     models_data = _build_models(core_dir, dist_dir, dsl)
     roles = _extract_roles(models_data) if models_data is not None else None
     _build_agents(core_dir, dist_dir, dsl, platform, models_data, roles)
+    _build_agent_bash_patterns(core_dir, dist_dir, dsl)
     _build_commands(core_dir, dist_dir, dsl)
     _build_skills(core_dir, dist_dir, dsl)
     _build_rules(core_dir, dist_dir, dsl)

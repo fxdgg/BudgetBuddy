@@ -323,11 +323,12 @@ _budget_init_ensure_gitignore() {
 # ─── 内部辅助：hooks 注入调用点 + 就位检测桩（design.md §9）─────────────
 
 _budget_init_hooks_inject() {
-    # hooks 注入编排调用点：Notification/PreToolUse/SubagentStop 三事件 →
-    # budget-notify-hook.py；注入前备份 settings.json.bak-budget + 临时文件
-    # 原子写 + 幂等重入（specs/notify「CodeBuddy hooks 三事件通知」）。
-    # 完整实现归 T10d（lib/hooks.sh 编排函数 budget_inject_hooks +
-    # lib/hooks_inject.py settings.json 读改写）；本函数为调用点 + 桩：
+    # hooks 注入编排调用点：codebuddy → Notification/PreToolUse/SubagentStop
+    # 三事件 + superpowers；claudecode → Notification/PermissionRequest/
+    # SubagentStop 三事件（无插件机制）；事件集与形态分派归 lib/hooks.sh
+    # budget_inject_hooks（kind 判定）。注入前备份 settings.json.bak-budget +
+    # 临时文件原子写 + 幂等重入（specs/notify「CodeBuddy hooks 三事件通知」）。
+    # 本函数为调用点 + 桩：
     #   - budget_inject_hooks 已定义（setup.sh 自动加载 hooks.sh 后）→ 调用
     #   - 模块文件在但函数未加载（旧版 setup.sh 分发场景）→ 补 source 后调用
     #   - 未就位 → 跳过并提示补全（不阻断 init 主流程）
@@ -517,12 +518,15 @@ do_init() {
     fi
     echo ""
 
-    # ---- Step 5/7: hooks 注入（codebuddy 形态；design.md §9 三事件）----
+    # ---- Step 5/7: hooks 注入（codebuddy/claudecode 形态，design.md §9/D4）----
     if [[ "$platform_kind" == "codebuddy" ]]; then
         budget_print_info "Step 5/7: hooks 注入（Notification/PreToolUse/SubagentStop）"
         _budget_init_hooks_inject || true
+    elif [[ "$platform_kind" == "claudecode" ]]; then
+        budget_print_info "Step 5/7: hooks 注入（Notification/PermissionRequest/SubagentStop）"
+        _budget_init_hooks_inject || true
     else
-        budget_print_info "Step 5/7: 非 codebuddy 形态，跳过 hooks 注入"
+        budget_print_info "Step 5/7: 非 codebuddy/claudecode 形态，跳过 hooks 注入"
     fi
     echo ""
 

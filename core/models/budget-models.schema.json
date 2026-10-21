@@ -200,6 +200,105 @@
       ],
       "type": "object"
     },
+    "codexModelId": {
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9.-]*$",
+      "type": "string"
+    },
+    "codexPresets": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "presets": {
+          "additionalProperties": false,
+          "properties": {
+            "balanced": {
+              "$ref": "#/definitions/codexRoleMap"
+            },
+            "economic": {
+              "$ref": "#/definitions/codexRoleMap"
+            },
+            "quality": {
+              "$ref": "#/definitions/codexRoleMap"
+            }
+          },
+          "required": [
+            "economic",
+            "balanced",
+            "quality"
+          ],
+          "type": "object"
+        },
+        "unconfirmed_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "presets"
+      ],
+      "type": "object"
+    },
+    "codexRoleMap": {
+      "additionalProperties": false,
+      "description": "model_role → Codex 模型 ID（须覆盖全部 10 个角色键，值为目录中的 gpt 组部署别名，platform 含 codex）",
+      "properties": {
+        "architect": {
+          "$ref": "#/definitions/codexModelId"
+        },
+        "coder_lite": {
+          "$ref": "#/definitions/codexModelId"
+        },
+        "coder_senior": {
+          "$ref": "#/definitions/codexModelId"
+        },
+        "coder_standard": {
+          "$ref": "#/definitions/codexModelId"
+        },
+        "director": {
+          "$ref": "#/definitions/codexModelId"
+        },
+        "goal_evaluator": {
+          "$ref": "#/definitions/codexModelId"
+        },
+        "recorder": {
+          "$ref": "#/definitions/codexModelId"
+        },
+        "reviewer": {
+          "$ref": "#/definitions/codexModelId"
+        },
+        "reviewer_b": {
+          "$ref": "#/definitions/codexModelId"
+        },
+        "tester": {
+          "$ref": "#/definitions/codexModelId"
+        }
+      },
+      "required": [
+        "architect",
+        "coder_lite",
+        "coder_standard",
+        "coder_senior",
+        "reviewer",
+        "reviewer_b",
+        "tester",
+        "recorder",
+        "director",
+        "goal_evaluator"
+      ],
+      "type": "object"
+    },
     "model": {
       "additionalProperties": false,
       "properties": {
@@ -219,7 +318,8 @@
             "enum": [
               "codebuddy",
               "opencode",
-              "claudecode"
+              "claudecode",
+              "codex"
             ],
             "type": "string"
           },
@@ -450,6 +550,9 @@
         "codebuddy": {
           "$ref": "#/definitions/codebuddyPresets"
         },
+        "codex": {
+          "$ref": "#/definitions/codexPresets"
+        },
         "opencode": {
           "$ref": "#/definitions/opencodePresets"
         }
@@ -457,6 +560,7 @@
       "required": [
         "claudecode",
         "codebuddy",
+        "codex",
         "opencode"
       ],
       "type": "object"

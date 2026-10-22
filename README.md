@@ -1,12 +1,12 @@
-# BudgetBuddy — Multi-Agent Cost-Saving Development Workflow Kit
+# BudgetBuddy — A Multi-Agent AI R&D Team with Clear Roles and Hard Gates
 
 **English** | [中文](README_CN.md) | [Changelog](CHANGELOG.md) | [License](LICENSE)
 
-BudgetBuddy is a multi-agent, cost-saving development workflow kit. It routes every task to the right sub-agent with the right model, so simple tasks burn cheap tokens and only hard tasks burn expensive ones. One neutral source (`core/`) builds into platform-specific distributions for **CodeBuddy**, **OpenCode**, **Claude Code**, and **Codex**; other agent platforms can be added by extending the build DSL (`core/platform/*.yaml`).
+BudgetBuddy turns one generalist AI into a structured development team: **10 specialized sub-agents** with clear responsibilities, an enforced **five-phase gated workflow**, and a Leader that orchestrates but never writes code. Every phase has an exit condition and every loop has a bound — saving tokens is not the pitch, it is a natural consequence of the division of labor and the gates. One neutral source (`core/`) builds into platform-specific distributions for **CodeBuddy**, **OpenCode**, **Claude Code**, and **Codex**; other agent platforms can be added by extending the build DSL (`core/platform/*.yaml`).
 
 ## What is BudgetBuddy?
 
-A typical coding request is a mix of trivial edits, routine features, and a few genuinely hard problems. Running everything on one premium model wastes budget; running everything on a cheap model misses the hard problems. BudgetBuddy splits the work across **10 specialized sub-agents** with per-role model assignment, wrapped in an enforced five-phase workflow (proposal → dual review → tiered implementation → final review → archive).
+Handing everything to a single "do-everything" AI blends design, implementation, review, verification, and arbitration into one context: responsibilities blur, context bloats, and the loop never converges. The problem is not model intelligence — it is missing team structure. BudgetBuddy splits the work across **10 specialized sub-agents** (three coder tiers routed by task complexity, per-role model assignment), enforces a five-phase workflow (proposal → dual design review → tiered implementation → final review → archive) where each phase has a unique artifact and an exit condition, and bounds every loop with explicit escalation (3 failed review rounds → Director final verdict) — turning AI coding from ad-hoc vibes into a team that delivers.
 
 The kit is self-bootstrapped: this repository is developed with BudgetBuddy's own workflow.
 

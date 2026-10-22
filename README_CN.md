@@ -1,12 +1,12 @@
-# BudgetBuddy — 多 Agent 省钱研发工作流套件
+# BudgetBuddy — 分工明确、门禁严格的多 Agent AI 研发团队
 
 **中文** | [English](README.md) | [变更日志](CHANGELOG.md) | [许可协议](LICENSE)
 
-BudgetBuddy 是一套多 Agent 省钱研发工作流。它把每个任务路由到「对的 sub-agent + 对的模型」：简单任务消耗廉价 token，只有硬任务才消耗昂贵 token。单一中立源（`core/`）构建出 **CodeBuddy**、**OpenCode**、**Claude Code** 与 **Codex** 四平台产物；其他 agent 平台可通过扩展构建 DSL（`core/platform/*.yaml`）接入。
+BudgetBuddy 把一个「全能 AI」变成一支有结构的研发团队：**10 个职责明确的专业 sub-agent**、强制执行的**五阶段门禁工作流**、一个只编排不写码的 Leader。每个阶段都有退出条件、每个循环都有上限——省钱不是它的卖点，而是分工与门禁带来的自然结果。单一中立源（`core/`）构建出 **CodeBuddy**、**OpenCode**、**Claude Code** 与 **Codex** 四平台产物；其他 agent 平台可通过扩展构建 DSL（`core/platform/*.yaml`）接入。
 
 ## BudgetBuddy 是什么？
 
-一个典型的编码需求混合着琐碎修改、常规功能和少数真正的难题。全部跑顶级模型浪费预算，全部跑廉价模型又搞不定难题。BudgetBuddy 把工作拆分给 **10 个专业 sub-agent**，按角色分配模型，并套上强制的五阶段工作流（方案 → 双审 → 分级实现 → 复审 → 归档）。
+把所有事都丢给一个「全能 AI」，方案、实现、审查、验证、裁决就全挤在同一个上下文里——职责混乱、上下文膨胀、循环不收敛。问题不在模型智商，而在缺「团队结构」。BudgetBuddy 把工作拆分给 **10 个专业 sub-agent**（三级 coder 按任务复杂度路由，按角色分配模型），套上强制的五阶段工作流（方案 → 方案双审 → 分级实现 → 复审 → 归档）——每个阶段都有唯一产物和退出条件，每个循环都有上限与兜底（3 轮审查全败 → Director 终裁），把 AI 研发从「随手 vibe」变成一支能交付的生产团队。
 
 本套件自举开发：本仓库自身就是用 BudgetBuddy 的工作流开发的。
 

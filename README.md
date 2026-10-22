@@ -1,4 +1,4 @@
-# BudgetBuddy — A Multi-Agent AI R&D Team with Clear Roles and Hard Gates
+# BudgetBuddy — Your Budget Buddy && An Orchestrated Multi-Agent AI R&D Team with Clear Roles and Hard Gates
 
 **English** | [中文](README_CN.md) | [Changelog](CHANGELOG.md) | [License](LICENSE)
 

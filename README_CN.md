@@ -1,4 +1,4 @@
-# BudgetBuddy — 分工明确、门禁严格的多 Agent AI 研发团队
+# BudgetBuddy — 您的预算伙伴 && 一支分工明确、门禁严格的多 Agent 编排的 AI 研发团队
 
 **中文** | [English](README.md) | [变更日志](CHANGELOG.md) | [许可协议](LICENSE)
 

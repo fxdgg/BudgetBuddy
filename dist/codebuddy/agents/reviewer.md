@@ -127,6 +127,22 @@ max_turns: 40
 ### 评分：【A/B/C/D】
 ```
 
+### 结构化标记
+
+**适用范围（MUST）**：**仅 Phase 2（方案评审）与 Phase 4（终审）**的报告输出本标记；**Phase 3 per-task 审查 MUST NOT 输出**（防止 round 值污染归档聚合）。
+
+报告正文末尾（任何代码块之外）输出最后一行：
+
+```html
+<!-- budget-verdict: {"rating":"<A|B|C|D>","conclusion":"<pass|revise|escalate>","round":<1-3|0>} -->
+```
+
+- `rating`：与上方「评分」档位一致（A/B/C/D）
+- `conclusion`：通过 → `pass`；需修改 → `revise`；升级人工 → `escalate`
+- `round`：Phase 2 按当前评审轮次填 1-3；Phase 4 终审固定填 `0`（终审无轮次语义）
+
+标记为 MUST 级约定：缺失时归档采集退化为人工兜底，不阻断审查流程本身；标记行仅行内追加，**不改变报告既有结构**。
+
 ## 终端命令规范
 
 直接写原生命令即可（仅限 git 相关操作）。

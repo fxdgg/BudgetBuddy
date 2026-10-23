@@ -221,12 +221,27 @@ def _guard_freshness(guard_file: str) -> list[dict] | None:
     ]
 
 
+def _metrics_trend() -> dict | None:
+    """质量趋势摘要（延迟导入 metrics；导入/取数失败或空态 → None 不展示）。"""
+    try:
+        import metrics
+    except ImportError:
+        return None
+    try:
+        trend = metrics.load_trend()
+    except Exception:
+        return None
+    if not trend.get('available'):
+        return None
+    return trend
+
+
 # ─── markdown 渲染 ───────────────────────────────────────────────────────
 
 
 def render_markdown(change_id: str, mode: str, data: dict, state_path: str,
-                    dispatch: dict, guard: dict) -> str:
-    """生成 markdown 摘要文本（概览 / 调用统计 / 完成步骤 / 失败降级史）。"""
+                    dispatch: dict, guard: dict, trend: dict | None = None) -> str:
+    """生成 markdown 摘要文本（概览 / 调用统计 / 完成步骤 / 失败降级史 / 质量趋势）。"""
     lines: list[str] = []
     lines.append(f'# 变更完成摘要: {change_id}')
     lines.append('')
@@ -294,6 +309,25 @@ def render_markdown(change_id: str, mode: str, data: dict, state_path: str,
                 stale = '是' if item['stale'] else '否'
                 lines.append(
                     f"  - {item['coder']}: n_eff={item['n_eff']:.2f} / 置信: {confidence} / 陈旧: {stale}")
+
+    if trend is not None:
+        lines.append('')
+        lines.append('## 质量趋势')
+        lines.append('')
+        ratings_text = ' → '.join(
+            str(r) if r is not None else '-' for r in trend['ratings'])
+        lines.append(f'- 评分序列: {ratings_text}')
+        if trend['pass_first_rate'] is not None:
+            lines.append(f'- 一次通过率: {trend["pass_first_rate"] * 100:.0f}%')
+        else:
+            lines.append('- 一次通过率: -')
+        if trend['guard_failure_rate'] is not None:
+            lines.append(f'- Guard 失败率: {trend["guard_failure_rate"] * 100:.0f}%')
+        else:
+            lines.append('- Guard 失败率: -')
+        for alert in trend['alerts']:
+            lines.append(f'- ⚠ {alert["message"]}')
+
     return '\n'.join(lines) + '\n'
 
 
@@ -335,7 +369,9 @@ def main() -> int:
     guard_file = args.guard_file or guard_file_path()
     dispatch = dispatch_stats(state_path)
     guard = guard_section(guard_file)
-    print(render_markdown(change_id, mode, data, state_path, dispatch, guard), end='')
+    trend = _metrics_trend()
+    print(render_markdown(change_id, mode, data, state_path, dispatch, guard, trend),
+          end='')
     return 0
 
 

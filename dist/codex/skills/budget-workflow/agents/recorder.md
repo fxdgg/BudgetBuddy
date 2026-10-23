@@ -53,6 +53,16 @@ description: MUST BE USED — 知识沉淀 agent。记录开发经验、归档�
 
 ## 归档流程
 
+**质量指标采集**（在 openspec archive **之前**执行——archive 会移动 change 目录到 `archive/<date>-<id>/`，之后扫描将落空）：
+
+```bash
+python3 $HOME/.budgetbuddy/lib/metrics.py record --change-id <id> --change-dir openspec/changes/<id>
+```
+
+- 脚本递归扫描 change 目录中的 `<!-- budget-verdict: ... -->` 标记，聚合后落盘质量指标
+- 标记缺失时人工参数兜底：`--phase2-rating / --phase2-rounds / --final-rating / --reviewer-b`（显式参数优先于扫描结果）
+- 脚本异常**不阻断归档**：stderr 提示后继续（指标缺失由趋势展示侧降级处理）
+
 ```bash
 openspec archive <change-id> -y
 ```

@@ -13,6 +13,8 @@
      前探测注入）/ 安装根（BUDGET_SETUP_DIR）/ agent 数（BUDGET_AGENTS_DIR
      扫描 .md）/ 角色主题（persona-active.json）
 
+另有可选「质量趋势」段（延迟导入 metrics；无数据/导入失败省略，不阻断其余输出）。
+
 环境变量（BUDGET_* 前缀；setup.sh 注入或独立执行时自主兜底）:
   BUDGET_PLATFORM_KIND / BUDGET_PLATFORM_SCOPE / BUDGET_AGENTS_DIR /
   BUDGET_SETUP_DIR / BUDGET_GUARD_FILE / BUDGET_PERSONA_ACTIVE / BUDGET_DIR
@@ -131,6 +133,21 @@ def _guard_freshness(path: str) -> list[dict] | None:
     ]
 
 
+def _metrics_trend() -> dict | None:
+    """质量趋势摘要（延迟导入 metrics；导入/取数失败或空态 → None 不展示）。"""
+    try:
+        import metrics
+    except ImportError:
+        return None
+    try:
+        trend = metrics.load_trend()
+    except Exception:
+        return None
+    if not trend.get('available'):
+        return None
+    return trend
+
+
 # ─── 数据源 2: 工作流状态机 ──────────────────────────────────────────────
 
 
@@ -235,9 +252,9 @@ def platform_section() -> dict:
 
 
 def collect() -> dict:
-    """汇总三类数据源（guard / state / project）。"""
+    """汇总三类数据源（guard / state / project）+ 可选质量趋势。"""
     changes = scan_changes()
-    return {
+    result = {
         'guard': guard_section(),
         'project': platform_section(),
         'state': {
@@ -245,6 +262,10 @@ def collect() -> dict:
             'changes': changes,
         },
     }
+    trend = _metrics_trend()
+    if trend is not None:
+        result['trend'] = trend
+    return result
 
 
 def _change_line(change: dict) -> str:
@@ -294,6 +315,24 @@ def render_text(data: dict) -> None:
                 print('  %s: n_eff=%.2f / 置信: %s / 陈旧: %s' % (
                     item['coder'], item['n_eff'], confidence, stale))
     print()
+
+    trend = data.get('trend')
+    if trend:
+        print('── 质量趋势 ──')
+        ratings_text = ' → '.join(
+            str(r) if r is not None else '-' for r in trend['ratings'])
+        print('评分序列:    %s' % ratings_text)
+        if trend['pass_first_rate'] is not None:
+            print('一次通过率:  %.0f%%' % (trend['pass_first_rate'] * 100))
+        else:
+            print('一次通过率:  -')
+        if trend['guard_failure_rate'] is not None:
+            print('Guard 失败率: %.0f%%' % (trend['guard_failure_rate'] * 100))
+        else:
+            print('Guard 失败率: -')
+        for alert in trend['alerts']:
+            print('⚠ %s' % alert['message'])
+        print()
 
     state = data['state']
     print('── 工作流状态机 ──')

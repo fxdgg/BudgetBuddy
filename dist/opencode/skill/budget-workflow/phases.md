@@ -487,7 +487,7 @@ lite(1轮) → standard(2轮) → senior(3轮) → Leader 根因分析 → Direc
 ```
 task({
   subagent_type: "reviewer",
-  prompt: "{roles.reviewer}，全部改完了，最后再过一遍。\n\n完成后直接输出结果。\n\n---\n\n对本次完整变更做最终审查：\n\n## 审查范围\n- 【文件范围审计 — 最先执行】执行 git diff --name-only 获取全部变更文件，与 design.md 文件范围章节比对。超出范围的文件变更直接判定不通过。\n- 查看全量 git diff（使用 Bash 执行 git diff）\n- 检查跨任务一致性\n- 检查代码规范合规（读取 AGENTS.md 标记区块（安装器合并） 对应规范）\n- 验证无遗留 TODO/FIXME\n- 检查是否有冲突或重复代码\n- 【测试逻辑验证】独立检查测试代码逻辑是否正确（claim key/参数名/断言期望值是否与实现一致），不信任 tester 报告的通过结论\n\n## 必须输出\n- 审查结论：【通过 / 不通过】\n- 如不通过：列出具体问题和建议修复方案",
+  prompt: "{roles.reviewer}，全部改完了，最后再过一遍。\n\n完成后直接输出结果。\n\n---\n\n对本次完整变更做最终审查：\n\n## 审查范围\n- 【文件范围审计 — 最先执行】执行 git diff --name-only 获取全部变更文件，与 design.md 文件范围章节比对。超出范围的文件变更直接判定不通过。\n- 查看全量 git diff（使用 Bash 执行 git diff）\n- 检查跨任务一致性\n- 检查代码规范合规（读取 AGENTS.md 标记区块（安装器合并） 对应规范）\n- 验证无遗留 TODO/FIXME\n- 检查是否有冲突或重复代码\n- 【测试逻辑验证】独立检查测试代码逻辑是否正确（claim key/参数名/断言期望值是否与实现一致），不信任 tester 报告的通过结论\n\n## 必须输出\n- 审查结论：【通过 / 需修改 / 升级人工】（与 reviewer 输出格式三值一致）\n- 如不通过：列出具体问题和建议修复方案\n- 评分：【A/B/C/D】（与输出格式的评分档一致）\n- 结构化标记行（round: 0，正文末尾、代码块之外）：<!-- budget-verdict: {\"rating\":\"<A|B|C|D>\",\"conclusion\":\"<pass|revise|escalate>\",\"round\":0} -->（conclusion 映射：通过=pass / 需修改=revise / 升级人工=escalate）\n- 报告经 Leader/Recorder 落盘 change 目录 final-review.md",
   description: "{roles.reviewer} 最终再过一遍",
   max_turns: 40
 })
@@ -507,7 +507,7 @@ task({
 ```
 task({
   subagent_type: "recorder",
-  prompt: "{roles.recorder}，活干完了，记一下档。\n\n完成后直接输出结果。\n\n---\n\n归档本次变更：\n\n1. 执行 openspec archive <change-id> -y\n2. 提取本次开发的关键经验和决策\n3. 更新 Coder Guard 记录（$HOME/.budgetbuddy/projects/<project-name>/memory/coder-guard.json，如有 review 升级/失败记录）\n4. 记录格式参照 agent 配置中的规范",
+  prompt: "{roles.recorder}，活干完了，记一下档。\n\n完成后直接输出结果。\n\n---\n\n归档本次变更：\n\n1. 质量指标采集（先于 archive——archive 会移动 change 目录，之后扫描落空）：python3 $HOME/.budgetbuddy/lib/metrics.py record --change-id <change-id> --change-dir openspec/changes/<change-id>（标记缺失时人工参数兜底 --phase2-rating / --phase2-rounds / --final-rating / --reviewer-b；脚本异常 stderr 提示后继续，不阻断归档）\n2. 执行 openspec archive <change-id> -y\n3. 提取本次开发的关键经验和决策\n4. 更新 Coder Guard 记录（$HOME/.budgetbuddy/projects/<project-name>/memory/coder-guard.json，如有 review 升级/失败记录）\n5. 记录格式参照 agent 配置中的规范",
   description: "{roles.recorder} 记下档",
   max_turns: 30
 })

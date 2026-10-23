@@ -766,20 +766,20 @@ class GuardQueryIntegrationTests(SandboxTestCase):
 
 
 class LibModuleCountTests(unittest.TestCase):
-    """用例 ⑫：core/lib/ 的 .sh + .py 共 27 个模块，六组枚举文件齐全。"""
+    """用例 ⑫：core/lib/ 的 .sh + .py 共 28 个模块，六组枚举文件齐全。"""
 
     def _actual_modules(self) -> set[str]:
         return {path.name for pattern in ('*.sh', '*.py') for path in LIB_DIR.glob(pattern)}
 
-    def test_module_count_is_27(self):
+    def test_module_count_is_28(self):
         modules = self._actual_modules()
-        self.assertEqual(len(modules), 27)
+        self.assertEqual(len(modules), 28)
         self.assertEqual(len(list(LIB_DIR.glob('*.sh'))), 16)
-        self.assertEqual(len(list(LIB_DIR.glob('*.py'))), 11)
+        self.assertEqual(len(list(LIB_DIR.glob('*.py'))), 12)
         self.assertTrue(METRICS_SCRIPT.is_file())
 
     def test_six_group_enumeration_complete(self):
-        """六组归组（design D5）：4+3+7+5+5+3 = 27。"""
+        """六组归组（design D5）：4+3+7+5+6+3 = 28。"""
         groups = {
             '基础层': {'colors.sh', 'utils.sh', 'platform.sh', 'shell.sh'},
             '生命周期': {'init.sh', 'update.sh', 'uninstall.sh'},
@@ -788,11 +788,11 @@ class LibModuleCountTests(unittest.TestCase):
             'persona 与校验': {'persona.sh', 'persona_expand.py', 'validate.sh',
                            'budget-state.py', 'display.py'},
             '交互与汇总': {'interactive.sh', 'quickstart.py', 'run_summary.py',
-                         'banner.py', 'autorun.py'},
+                         'banner.py', 'autorun.py', 'metrics.py'},
             '通知与 hooks': {'notify.sh', 'hooks.sh', 'hooks_inject.py'},
         }
         enumerated = set().union(*groups.values())
-        self.assertEqual(sum(len(files) for files in groups.values()), 27)
+        self.assertEqual(sum(len(files) for files in groups.values()), 28)
         self.assertEqual(enumerated, self._actual_modules())
 
 

@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-10-23
+
+### Added
+
+- **Coder Guard memory freshness & confidence labels** — the guard memory (per-coder, per-tag failure records driving tier downgrade) now surfaces *how trustworthy the records are* alongside the downgrade verdict: new `core/lib/guard_metrics.py` (stdlib only, import + CLI dual form) computes exponentially time-decayed weights `0.5^(age/half-life)` (default 30-day half-life, `BUDGET_GUARD_HALF_LIFE_DAYS` override), effective sample size `n_eff`, a confidence tier (low < 2 / medium < 4 / high ≥ 4), and a stale flag (newest record older than 90 days, `BUDGET_GUARD_STALE_DAYS` override — the two thresholds are independent); surfaced on four read surfaces from one implementation source: `budget setup guard query` (freshness block + "records stale / insufficient sample, downgrade advice is reference-only" hint when `n_eff` < 2 or stale), `guard summary` (reused by the top-level `budget status` chain — notify.sh untouched), `budget setup stats`, and run summaries; the hard downgrade rule (≥2 failures in the last 5 attempts) is deliberately untouched — decay only informs, never weakens the gate; two-layer fault tolerance (guard.sh subprocess failure → skip the freshness block and return the main output; display/run_summary delayed import → omit the section, exit 0); unparseable timestamps weigh 0 and never affect staleness
+- **Post-task quality metrics & trend alerts (continuous agent evaluation)** — reviewer / reviewer-b reports now end with a machine-parsable `<!-- budget-verdict: {...} -->` marker (rating A/B/C/D + conclusion + review round; Phase 2 rounds 1–3, Phase 4 final review round 0; Phase 3 per-task reviews deliberately excluded to avoid aggregation pollution); at archive time the recorder runs `core/lib/metrics.py record` **before** `openspec archive` (archive moves the change directory — recording afterwards would scan an empty path), aggregating phase-2 rating/rounds, reviewer-b conclusion, final rating, and a guard snapshot (history-scoped failure / total / downgrade counts — not the summary buckets, which double-count multi-tag entries) into `~/.budgetbuddy/projects/<name>/memory/metrics.json` (idempotent per change_id, atomic 0600 write, manual CLI fallback when markers are missing); same-round multi-file markers resolve by lexicographic file-path tie-breaker; marker extraction is whole-line-anchored so inline format examples inside documents are never mis-extracted; `budget setup stats` and run summaries render a "quality trend" section (rating sequence, first-pass rate, guard failure rate) with three alert rules — R1 strictly-declining ratings (null interrupts the sequence), R2 first-pass rate < 50% (zero denominator never alerts), R3 guard failure rate > 40% (latest snapshot, sample ≥ 5); alerts are query-surface-only reference — no N-event notifications fire, guard writes and downgrade rules untouched; delayed-import fault tolerance identical to the guard integration
+
+### Fixed
+
+- **Step 5 final-review prompt alignment** — the final-review prompt now requests the three-value verdict (通过 / 需修改 / 升级人工) matching the reviewer output format, plus the A/B/C/D rating and the round-0 verdict marker; the report lands in the change directory as `final-review.md`
+
+### Tests
+
+- 858 → 936 test cases (+78: 34 guard-metrics including cross-surface numeric consistency and fault-tolerance suites; 44 quality-metrics including marker-extraction edge cases, idempotent recording, alert-rule boundaries, and display/run_summary integration; lib module-count assertions updated 27 → 28)
+
 ## [0.4.0] - 2026-10-21
 
 ### Added

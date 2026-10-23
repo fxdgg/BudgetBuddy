@@ -10,8 +10,9 @@
 # 环境变量:
 #   BUDGET_REPO_URL   下载源（默认 GitHub raw 占位地址，推送远端后修正）
 #   BUDGET_VERSION    指定版本 tag（默认经 releases/latest 发现最新版）
-#   BUDGET_PLATFORM   平台 codebuddy|opencode|claudecode|both|all（跳过平台交互；
-#                     all=三平台全部安装【推荐】；both=codebuddy+opencode 历史兼容）
+#   BUDGET_MIRROR     镜像前缀三态：https://<镜像> 钉死单镜像 / none|off|direct 仅直连 / 未设按 host 自动回退链
+#   BUDGET_PLATFORM   平台 codebuddy|opencode|claudecode|codex|both|all（跳过平台交互；
+#                     默认 opencode；all=四平台全部安装【推荐】；both=codebuddy+opencode 历史兼容）
 #   BUDGET_GLOBAL     0=项目 / 1=全局（设置即跳过作用域交互）
 #
 # 安全（specs/installer「下载包完整性校验」/「manifest 增量同步」）:
@@ -27,13 +28,14 @@ BUDGET_REPO_URL="${BUDGET_REPO_URL:-https://github.com/fxdgg/BudgetBuddy}"
 BUDGET_VERSION="${BUDGET_VERSION:-}"
 
 # ─── 全局状态 ──────────────────────────────────────────────────────────────
-BUDGET_INSTALL_PLATFORM="codebuddy"   # codebuddy | opencode | claudecode | codex | both | all
+BUDGET_INSTALL_PLATFORM="opencode"    # codebuddy | opencode | claudecode | codex | both | all
 BUDGET_INSTALL_GLOBAL=0               # 1=全局
 BUDGET_SCOPE_EXPLICIT=0               # BUDGET_GLOBAL 环境变量已显式设置
 BUDGET_PYTHON="${BUDGET_PYTHON:-}"
 SHA256_CMD=""
 BUDGET_SRC_ROOT=""                    # dist/ 的父目录（仓库根或 zip 解压根）
 BUDGET_TMP_DIR=""
+BUDGET_EFFECTIVE_MIRROR=""             # 版本发现命中的镜像前缀（下载阶段链首复用）
 SUMMARY_OUTPUT=""
 
 # 同步统计（install_* 内重置；进程替换循环在当前 shell，计数可传播）
@@ -176,26 +178,27 @@ select_platform() {
     esac
     echo ""
     echo -e "${CYAN}请选择安装平台:${NC}"
-    echo "  1) CodeBuddy   — agents/commands/skills/rules/hooks → .codebuddy/（或 ~/.codebuddy/）"
-    echo "  2) OpenCode    — agent/command/skill → opencode 目录 + 管理面 ~/.budgetbuddy/"
+    echo "  1) OpenCode    — agent/command/skill → opencode 目录 + 管理面 ~/.budgetbuddy/"
+    echo "  2) CodeBuddy   — agents/commands/skills/rules/hooks → .codebuddy/（或 ~/.codebuddy/）"
     echo "  3) Claude Code — agents/commands/skills/hooks → .claude/（或 ~/.claude/）+ 管理面 ~/.budgetbuddy/"
     echo "  4) Codex       — skills → .codex/skills/（或 ~/.codex/skills/）+ 管理面 ~/.budgetbuddy/ + config.toml multi_agent 注入"
-    echo "  5) 全部        — 依次执行 CodeBuddy、OpenCode、Claude Code 与 Codex 安装"
+    echo "  5) 全部        — 依次执行 OpenCode、CodeBuddy、Claude Code 与 Codex 安装"
     echo ""
     echo -n "请输入 (1/2/3/4/5，默认 1): "
     local choice=""
     # 交互从 /dev/tty 读取（curl|bash 管道安装也支持）；无 tty 走默认
     if read -r choice < /dev/tty 2>/dev/null; then
         case "$choice" in
-            2) BUDGET_INSTALL_PLATFORM="opencode" ;;
+            1) BUDGET_INSTALL_PLATFORM="opencode" ;;
+            2) BUDGET_INSTALL_PLATFORM="codebuddy" ;;
             3) BUDGET_INSTALL_PLATFORM="claudecode" ;;
             4) BUDGET_INSTALL_PLATFORM="codex" ;;
             5) BUDGET_INSTALL_PLATFORM="all" ;;
-            *) BUDGET_INSTALL_PLATFORM="codebuddy" ;;
+            *) BUDGET_INSTALL_PLATFORM="opencode" ;;
         esac
     else
-        print_warning "无交互终端（/dev/tty 不可用），默认安装 CodeBuddy 平台"
-        BUDGET_INSTALL_PLATFORM="codebuddy"
+        print_warning "无交互终端（/dev/tty 不可用），默认安装 OpenCode 平台"
+        BUDGET_INSTALL_PLATFORM="opencode"
     fi
     echo ""
 }
@@ -224,37 +227,123 @@ select_scope() {
 }
 
 # ─── 在线模式：版本定位与下载校验（specs/installer「版本定位与下载包完整性校验」）
-resolve_latest_tag() {
-    # 经 $BUDGET_REPO_URL/releases/latest（release 托管方 latest 固定别名）
-    # 解析重定向后的 URL 提取最新版本 tag（design.md §10/A9）
-    local effective_url=""
-    effective_url="$(curl -fsSL -o /dev/null -w '%{url_effective}' \
-        "$BUDGET_REPO_URL/releases/latest" 2>/dev/null)" \
-        || print_error "无法获取最新版本信息（$BUDGET_REPO_URL/releases/latest）\n请检查网络连接，或设置 BUDGET_VERSION 指定版本"
-    local tag="${effective_url##*/}"
-    if [[ -z "$tag" || "$tag" == "latest" ]]; then
-        print_error "无法从重定向 URL 解析版本 tag: $effective_url"
+mirror_candidates() {
+    # 输出镜像前缀链表（每行一个；空行 = 直连）。BUDGET_MIRROR 三态：
+    #   https://<镜像>  → 仅该镜像（跳过直连）
+    #   none|off|direct（大小写不敏感）→ 仅空行（直连，禁第三方通道）
+    #   未设 → 按 BUDGET_REPO_URL host 判定：github.com（默认值与 fork 均命中）
+    #   → 空行 + ghfast.top + gh-proxy.com；host 非 github.com（自定义源已接管
+    #   下载）→ 仅空行
+    local mirror="${BUDGET_MIRROR:-}"
+    if [[ -n "$mirror" ]]; then
+        case "$(printf '%s' "$mirror" | tr '[:upper:]' '[:lower:]')" in
+            none|off|direct)
+                echo ""
+                ;;
+            *)
+                echo "$mirror"
+                ;;
+        esac
+        return 0
     fi
-    echo "$tag"
+    local host="${BUDGET_REPO_URL#*://}"
+    host="${host%%/*}"
+    host="${host##*@}"
+    if [[ "$host" == "github.com" ]]; then
+        echo ""
+        echo "https://ghfast.top"
+        echo "https://gh-proxy.com"
+    else
+        echo ""
+    fi
+}
+
+apply_mirror() {
+    # 用法: apply_mirror <url> <prefix>
+    # prefix 空则原样输出 url；否则输出 "<prefix>/<url>"（ghproxy 类代理格式）
+    local url="$1"
+    local prefix="$2"
+    if [[ -z "$prefix" ]]; then
+        echo "$url"
+    else
+        echo "${prefix}/${url}"
+    fi
+}
+
+resolve_latest_tag() {
+    # 经 $BUDGET_REPO_URL/releases/latest 镜像链迭代解析最新 tag。
+    # 命中镜像记入全局 BUDGET_EFFECTIVE_MIRROR——本函数须在主 shell 直接执行
+    # （不得置于 $(...) 命令替换子 shell 内，子 shell 赋值不传播父 shell）。
+    # stdout 输出最终 tag；级别失败两形态（curl 非零 / url_effective 尾段无法
+    # 解析出非 latest 的有效 tag）均打印降级提示后进入下一级。
+    local candidates prefix="" url="" effective_url="" tag=""
+    candidates="$(mirror_candidates)"
+    if [[ -n "${BUDGET_EFFECTIVE_MIRROR:-}" ]]; then
+        candidates="${BUDGET_EFFECTIVE_MIRROR}"$'\n'"$candidates"
+    fi
+    while IFS= read -r prefix; do
+        if [[ -z "$prefix" ]]; then
+            url="$BUDGET_REPO_URL/releases/latest"
+        else
+            url="$(apply_mirror "$BUDGET_REPO_URL/releases/latest" "$prefix")"
+        fi
+        effective_url=""
+        if effective_url="$(curl -fsSL --retry 2 --retry-delay 2 -o /dev/null \
+            -w '%{url_effective}' "$url" 2>/dev/null)"; then
+            tag="${effective_url##*/}"
+        else
+            tag=""
+        fi
+        if [[ -n "$tag" && "$tag" != "latest" ]]; then
+            BUDGET_EFFECTIVE_MIRROR="$prefix"
+            echo "$tag"
+            return 0
+        fi
+        if [[ -z "$prefix" ]]; then
+            print_info "直连 GitHub 失败，尝试镜像源…（第三方传输通道，SHA256 校验仍然执行）" >&2
+        else
+            print_info "镜像 $prefix 不可用（网络或重定向语义失败），尝试下一级…（第三方传输通道，SHA256 校验仍然执行）" >&2
+        fi
+    done <<< "$candidates"
+    print_error "无法获取最新版本信息（$BUDGET_REPO_URL/releases/latest）\n请检查网络连接，或设置 BUDGET_VERSION 指定具体版本（直达资产路径，无需 latest 发现）"
 }
 
 download_release() {
     # 用法: download_release <tag>
     # 下载 zip + .sha256 → 强制 SHA256 校验（失败即中止，A12①）→ python 解压
     # （zip 解压走 python3 zipfile，避免 unzip 依赖）
+    # 镜像链：链首 = BUDGET_EFFECTIVE_MIRROR（若已置）+ mirror_candidates 余项；
+    # 每级 zip 与 .sha256 整对在同镜像完成，任一失败整对回落下一级；全链失败
+    # 按既有错误语义报错。
     local tag="$1"
     local version="${tag#v}"
     local zip_name="budgetbuddy-${version}.zip"
-    local zip_url="$BUDGET_REPO_URL/releases/download/$tag/$zip_name"
+    local rel_path="releases/download/$tag/$zip_name"
     local zip_file="$BUDGET_TMP_DIR/$zip_name"
 
-    print_info "下载 $zip_url ..."
-    if ! curl -fsSL --retry 3 --retry-delay 2 -o "$zip_file" "$zip_url"; then
-        print_error "下载失败: $zip_url\n请检查网络连接或 BUDGET_REPO_URL 配置"
+    local candidates prefix="" zip_url="" downloaded=false
+    candidates="$(mirror_candidates)"
+    if [[ -n "${BUDGET_EFFECTIVE_MIRROR:-}" ]]; then
+        candidates="${BUDGET_EFFECTIVE_MIRROR}"$'\n'"$candidates"
     fi
-    print_info "下载校验文件 $zip_url.sha256 ..."
-    if ! curl -fsSL --retry 3 --retry-delay 2 -o "${zip_file}.sha256" "${zip_url}.sha256"; then
-        print_error "校验文件下载失败: ${zip_url}.sha256\nrelease 必须附带 .sha256 校验文件（缺失即中止，不进入安装）"
+    while IFS= read -r prefix; do
+        zip_url="$(apply_mirror "$BUDGET_REPO_URL/$rel_path" "$prefix")"
+        print_info "下载 $zip_url ..."
+        if curl -fsSL --retry 2 --retry-delay 2 -o "$zip_file" "$zip_url" \
+            && curl -fsSL --retry 2 --retry-delay 2 -o "${zip_file}.sha256" "${zip_url}.sha256"; then
+            downloaded=true
+            break
+        fi
+        # 级失败：zip 与 .sha256 整对在同一镜像未全部成功，整对回落下一级
+        rm -f "$zip_file" "${zip_file}.sha256"
+        if [[ -z "$prefix" ]]; then
+            print_info "直连 GitHub 下载失败，尝试镜像源…（第三方传输通道，SHA256 校验仍然执行）" >&2
+        else
+            print_info "镜像 $prefix 下载失败，尝试下一级…（第三方传输通道，SHA256 校验仍然执行）" >&2
+        fi
+    done <<< "$candidates"
+    if [[ "$downloaded" != "true" ]]; then
+        print_error "下载失败: $BUDGET_REPO_URL/releases/download/$tag/$zip_name\n请检查网络连接或 BUDGET_REPO_URL 配置（release 必须附带 .sha256 校验文件，缺失即中止，不进入安装）\n或设置 BUDGET_VERSION 显式指定具体版本（直达 releases/download/<tag> 资产路径，无重定向）"
     fi
     # 强制 SHA256 校验（失败即中止，不复制任何文件到安装目录）
     local expected="" actual=""
@@ -324,7 +413,11 @@ resolve_source() {
     trap 'rm -rf -- "$BUDGET_TMP_DIR"' EXIT
     local tag="$BUDGET_VERSION"
     if [[ -z "$tag" ]]; then
-        tag="$(resolve_latest_tag)"
+        local tag_file=""
+        tag_file="$(mktemp 2>/dev/null || mktemp -t budget-tag)" || print_error "临时文件创建失败"
+        resolve_latest_tag > "$tag_file"
+        tag="$(cat "$tag_file")"
+        rm -f "$tag_file"
     fi
     print_info "目标版本: $tag"
     download_release "$tag"
@@ -1462,7 +1555,7 @@ main() {
         claudecode) install_claudecode ;;
         codex)      install_codex ;;
         both)       install_codebuddy; install_opencode ;;
-        all)        install_codebuddy; install_opencode; install_claudecode; install_codex ;;
+        all)        install_opencode; install_codebuddy; install_claudecode; install_codex ;;
         *)          print_error "内部错误: 未知平台 $BUDGET_INSTALL_PLATFORM" ;;
     esac
     print_summary
@@ -1470,4 +1563,9 @@ main() {
 
 trap 'print_error "安装过程被中断"' INT TERM
 
-main "$@"
+# bash main guard（source 安全：BASH_SOURCE[0] ≠ $0 时不执行 main；`:-$0`
+# 兜底防 curl|bash 管道入口下 BASH_SOURCE 空数组 + set -u 崩溃）。用 if 形态
+# 而非 `&&`——`&&` 在 source 态会以非零退出，叠加 set -e 使 source 方中断。
+if [[ "${BASH_SOURCE[0]:-$0}" == "$0" ]]; then
+    main "$@"
+fi

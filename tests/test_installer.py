@@ -257,12 +257,16 @@ class NonInteractiveTests(InstallerSandbox):
         self.assertTrue((self.work / '.codebuddy' / 'setup.sh').is_file())
 
     def test_no_tty_defaults_to_project(self):
-        # 纯非交互环境（无控制终端）：默认 codebuddy + 项目安装
+        # 纯非交互环境（无控制终端）：默认 opencode + 项目安装
         result = self.run_install(new_session=True)
         self.assert_install_ok(result)
-        self.assertIn('默认安装 CodeBuddy 平台', result.stdout)
-        self.assertTrue((self.work / '.codebuddy' / 'setup.sh').is_file())
-        self.assertFalse((self.home / '.codebuddy').exists())
+        self.assertIn('默认安装 OpenCode 平台', result.stdout)
+        # 项目级落点：cwd/.opencode/agent
+        self.assertTrue((self.work / '.opencode' / 'agent').is_dir())
+        # 作用域默认项目不变：无全局 opencode 残留
+        self.assertFalse((self.home / '.config' / 'opencode').exists())
+        # 默认平台已切换：无 codebuddy 落点
+        self.assertFalse((self.work / '.codebuddy').exists())
 
     def test_both_mode_installs_two_platforms(self):
         result = self.run_install(
@@ -275,6 +279,93 @@ class NonInteractiveTests(InstallerSandbox):
         agents_md = self.work / 'AGENTS.md'
         self.assertTrue(agents_md.is_file())
         self.assertIn(AGENTS_BEGIN, agents_md.read_text(encoding='utf-8'))
+
+
+class MirrorFunctionTests(unittest.TestCase):
+    """镜像纯函数 mirror_candidates / apply_mirror（specs/installer 镜像回退链）。
+
+    以 subprocess source install.sh 后直接调用函数：main guard 为 if 形态，
+    source 态不执行 main（子进程隔离，不污染本进程）。环境变量经 env= 传参，
+    规避 bash 3.2 下 `VAR=val source file` 前缀变量对函数内引用不可见的怪癖。
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory(prefix='budget-mirror-')
+        self.addCleanup(self._tmp.cleanup)
+        self.home = Path(self._tmp.name)
+
+    def run_source(self, expression, env_extra=None):
+        """source install.sh 后执行 expression，返回 CompletedProcess。"""
+        env = dict(os.environ)
+        env['HOME'] = str(self.home)
+        for key in list(env):
+            if key.startswith('BUDGET_'):
+                del env[key]
+        env['PATH'] = ':'.join(
+            p for p in env.get('PATH', '').split(':')
+            if p and '/shim/safe-bin' not in p)
+        if env_extra:
+            env.update(env_extra)
+        return subprocess.run(
+            ['bash', '-c', 'source "$1" || exit 1; ' + expression,
+             'mirror-test', str(INSTALL_SH)],
+            env=env, capture_output=True, text=True, encoding='utf-8',
+            timeout=60,
+        )
+
+    def candidates(self, env_extra=None):
+        """调用 mirror_candidates，按行返回镜像链（首项空串=直连）。"""
+        result = self.run_source('mirror_candidates', env_extra)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout.splitlines()
+
+    def test_default_chain_has_three_candidates(self):
+        # 未设 BUDGET_MIRROR + 默认 BUDGET_REPO_URL（github.com）：
+        # 直连 → ghfast.top → gh-proxy.com
+        self.assertEqual(
+            self.candidates(),
+            ['', 'https://ghfast.top', 'https://gh-proxy.com'])
+
+    def test_disable_values_only_direct(self):
+        # none / off / direct（大小写不敏感）→ 仅直连，禁用第三方通道
+        for value in ('none', 'off', 'direct', 'DIRECT'):
+            with self.subTest(mirror=value):
+                self.assertEqual(self.candidates({'BUDGET_MIRROR': value}), [''])
+
+    def test_pinned_mirror_single_candidate(self):
+        # https://<镜像> → 仅该前缀（跳过直连）
+        self.assertEqual(
+            self.candidates({'BUDGET_MIRROR': 'https://m.example'}),
+            ['https://m.example'])
+
+    def test_non_github_host_only_direct(self):
+        # 自定义源（host 非 github.com）已接管下载 → 仅直连
+        self.assertEqual(
+            self.candidates({'BUDGET_REPO_URL': 'https://gitlab.com/x/y'}), [''])
+
+    def test_github_fork_host_hits_predicate(self):
+        # github.com fork 同样命中 host 谓词 → 三候选链
+        self.assertEqual(
+            self.candidates(
+                {'BUDGET_REPO_URL': 'https://github.com/other/repo'}),
+            ['', 'https://ghfast.top', 'https://gh-proxy.com'])
+
+    def test_non_reserved_mirror_value_passed_through(self):
+        # 非法值（非 URL 非 none）按实现走「钉死单前缀」分支：原样输出一行
+        self.assertEqual(self.candidates({'BUDGET_MIRROR': 'abc'}), ['abc'])
+
+    def test_apply_mirror_empty_prefix_returns_url(self):
+        url = 'https://github.com/o/r/releases/download/v1/x.zip'
+        result = self.run_source('apply_mirror "%s" ""' % url)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), url)
+
+    def test_apply_mirror_prefix_joins(self):
+        url = 'https://github.com/o/r/releases/download/v1/x.zip'
+        result = self.run_source(
+            'apply_mirror "%s" "https://ghfast.top"' % url)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), 'https://ghfast.top/' + url)
 
 
 class CodebuddyProjectTests(InstallerSandbox):

@@ -44,6 +44,30 @@ BUDGET_PLATFORM=codex BUDGET_GLOBAL=1 bash install.sh      # global Codex instal
 BUDGET_PLATFORM=all bash install.sh                        # all four platforms (recommended)
 ```
 
+### Mainland China networks & mirrors
+
+Online install falls back automatically: when a direct GitHub request fails, the installer retries in order through the `ghfast.top` and `gh-proxy.com` mirrors (third-party ghproxy-style transport channels). Version discovery and the release assets are completed on the **same** mirror — the zip and its matching `.sha256` are always fetched as one pair from one host, never mixed across hosts.
+
+`BUDGET_MIRROR` has three states:
+
+```bash
+BUDGET_MIRROR=https://<mirror> bash install.sh   # pin one mirror (direct GitHub is skipped)
+BUDGET_MIRROR=none bash install.sh               # disable mirrors — direct GitHub only
+bash install.sh                                  # unset — automatic fallback chain
+```
+
+`BUDGET_MIRROR=none` (also `off` / `direct`) is the choice for trust-sensitive environments: no third-party host is contacted at all.
+
+`BUDGET_VERSION` is the escape hatch: if a mirror cannot resolve `latest`, pin the version explicitly. The installer then goes straight to the `releases/download/<tag>` asset path, which has no redirect segment and is therefore unaffected by how a proxy handles redirects:
+
+```bash
+BUDGET_VERSION=v0.5.0 bash install.sh
+```
+
+**Trust boundary** — mirrors are transport channels only; SHA256 verification stays mandatory and unchanged, and a checksum mismatch still aborts the install. The caveat is that the zip and its `.sha256` travel over the same chain, so a malicious proxy could in theory tamper with both as a matched pair; when that matters, install with `BUDGET_MIRROR=none` and go direct.
+
+**Custom sources** — when `BUDGET_REPO_URL` points at your own mirror host (any host other than `github.com`), no third-party mirror is layered on top: the installer talks to your source only.
+
 ### Manual install
 
 ```bash

@@ -44,6 +44,30 @@ BUDGET_PLATFORM=codex BUDGET_GLOBAL=1 bash install.sh      # Codex 全局安装
 BUDGET_PLATFORM=all bash install.sh                        # 四平台全部安装（推荐）
 ```
 
+### 大陆网络与镜像
+
+在线安装会自动回退：直连 GitHub 请求失败时，安装器按顺序尝试 `ghfast.top` 与 `gh-proxy.com` 镜像（第三方 ghproxy 类传输通道）。版本发现与 release 资产在**同一**镜像上完成——zip 与其对应的 `.sha256` 始终作为一整对从同一主机获取，不会跨主机混取。
+
+`BUDGET_MIRROR` 有三种状态：
+
+```bash
+BUDGET_MIRROR=https://<mirror> bash install.sh   # 钉死单个镜像（跳过直连 GitHub）
+BUDGET_MIRROR=none bash install.sh               # 禁用镜像——仅直连 GitHub
+bash install.sh                                  # 未设置——自动回退链
+```
+
+`BUDGET_MIRROR=none`（亦可 `off` / `direct`）适用于信任敏感场景：完全不接触任何第三方主机。
+
+`BUDGET_VERSION` 是逃生通道：若某个镜像无法解析 `latest`，可显式指定版本。安装器将直达 `releases/download/<tag>` 资产路径，该路径没有重定向段，因此不受代理重定向行为影响：
+
+```bash
+BUDGET_VERSION=v0.5.0 bash install.sh
+```
+
+**信任边界**——镜像仅为传输通道；SHA256 强制校验保持不变，校验不一致仍会中止安装。需要说明的是，zip 与 `.sha256` 走同一条链路，因此恶意代理理论上可将两者成对篡改；若在意这一点，请用 `BUDGET_MIRROR=none` 直连安装。
+
+**自定义源**——当 `BUDGET_REPO_URL` 指向自建镜像站（host 非 `github.com`）时，不会自动叠加第三方镜像链：安装器只与你的源通信。
+
 ### 手动安装
 
 ```bash

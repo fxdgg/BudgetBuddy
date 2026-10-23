@@ -1,0 +1,11 @@
+## 1. 安装器实现（install.sh）
+
+- [x] 1.1 修改 `install.sh` 菜单与默认：三处默认改 `opencode`（30 行初始变量 / 交互 `*)` 分支 / 无 tty 回退含提示语「默认安装 OpenCode 平台」）；菜单编号 1) OpenCode / 2) CodeBuddy / 3) Claude Code / 4) Codex / 5) 全部；`all` 分支调用序改 `install_opencode; install_codebuddy; install_claudecode; install_codex`；菜单「全部」文案改「依次执行 OpenCode、CodeBuddy、Claude Code 与 Codex 安装」；`both` 分支零改动；头部用法注释同步（默认平台说明 + 修正「all=三平台」过时表述为四平台）【config_edit】
+- [x] 1.2 修改 `install.sh` 镜像链：新增纯函数 `mirror_candidates()`（按 BUDGET_MIRROR/BUDGET_REPO_URL 生成前缀链表：未设+默认 URL → `""`/`https://ghfast.top`/`https://gh-proxy.com`；`https://<m>` → 仅该值；none/off/direct（大小写不敏感）→ 仅 `""`；未设+自定义 URL → 仅 `""`）与 `apply_mirror <url> <prefix>`（空前缀原样返回，否则 `<prefix>/<url>`）；`resolve_latest_tag` 与 `download_release` 改为按链迭代（各级 `curl -fsSL --retry 2 --retry-delay 2`，级失败打印 `[i] 直连 GitHub 失败，尝试镜像源 <X>（第三方传输通道，SHA256 校验仍然执行）` 形态提示，直连级提示语适配「直连」措辞）；版本发现命中镜像记入 `BUDGET_EFFECTIVE_MIRROR`，下载阶段链首插入该值（失败回落完整链）；三级全败保持既有错误语义并提示 BUDGET_VERSION 逃生；**级别失败含 tag 解析失败形态**（url_effective 尾段为 latest）；`mirror_candidates` 谓词按 host==github.com（默认值与 fork 均走链）；**顶层执行段改 main guard**（`[[ "${BASH_SOURCE[0]:-$0}" == "$0" ]] && main "$@"`——`:-$0` 兜底为硬性要求：curl|bash 管道入口下 BASH_SOURCE 空数组、set -u 裸引用即崩溃；source 安全、直行行为不变）；SHA256 校验与本地模式逻辑零改动；头部环境变量注释补 BUDGET_MIRROR 三态说明【cross_module】
+
+## 2. README 双语与测试
+
+- [x] 2.1 README.md / README_CN.md 安装章节（在线安装小节后）新增「大陆网络与镜像 / Mainland China networks & mirrors」说明段：自动回退链、BUDGET_MIRROR 钉死与 none 禁用用法（含示例）、信任边界（第三方传输通道、SHA256 强制校验、恶意代理成对篡改的理论风险与退出通道）、双语信息点一一对应【docs_only】
+- [x] 2.2 修改 `tests/test_installer.py`：`test_no_tty_defaults_to_project` 断言更新（「默认安装 OpenCode 平台」+ `.opencode/agent` 项目级落点 + 作用域默认项目不变断言——`assertFalse((self.home / '.config' / 'opencode').exists())`（无全局残留））；新增镜像纯函数用例（source install.sh 方式——顶层 main guard 使 source 安全，先例 test_guard.py source guard.sh）：mirror_candidates 四态（默认链三值 / 钉死单值 / none 仅空 / 自定义 URL 仅空）、apply_mirror（空前缀原样 / 前缀拼接）；全量回归【test_only】
+- [x] 2.3 门禁与实测（tester 执行）：`build.py --check`、`scan-brand.py`、全量 unittest；沙盒实测（本地模式安装回归 + BUDGET_MIRROR 三态经 `bash -c 'source install.sh; mirror_candidates'` 冒烟 + 环境变量非交互 BUDGET_PLATFORM=opencode 安装照常 + 无 tty 默认 OpenCode 落点）【test_only】
+- [x] 2.4 人工审计（reviewer 执行）：对照 installer/repo-docs delta 全部 scenario 逐条核验；核对 SHA256 校验代码路径零改动、both 零改动、本地模式零改动；README 双语对等

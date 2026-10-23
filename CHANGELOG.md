@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Installer: OpenCode default & mainland-China mirror chain** — the platform menu now lists OpenCode first and defaults to it in all three paths (interactive empty input, no-TTY fallback, non-interactive initial value); the `all` path installs OpenCode first; online installs fall back automatically from a direct GitHub connection through `ghfast.top` and `gh-proxy.com` (ghproxy-style third-party transport — level failure covers both network errors and redirect-semantics loss, i.e. a mirror that self-follows the `releases/latest` redirect is skipped); `BUDGET_MIRROR` pins a single mirror or disables third-party channels (`none` / `off` / `direct`); `BUDGET_VERSION` remains the escape hatch (straight to `releases/download/<tag>`, no redirect segment); the zip and its `.sha256` are always fetched as a pair from one mirror with SHA256 verification unchanged; custom `BUDGET_REPO_URL` sources (non-`github.com` hosts) never get the mirror chain layered on; `install.sh` gains a source-safe main guard (`if [[ "${BASH_SOURCE[0]:-$0}" == "$0" ]]`, pipe-entry `set -u` safe); bilingual README documents the mirror section
+
 ## [0.5.0] - 2026-10-23
 
 ### Added

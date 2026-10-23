@@ -157,6 +157,83 @@ print(json.dumps({
 PYEOF
 }
 
+# ─── 保鲜与置信（读取时加权统计，design D4；子进程失败静默跳过）──────────
+
+# 定位 guard_metrics.py（guard.sh 同目录优先，BUDGET_LIB_DIR 兜底）
+_guard_metrics_path() {
+    local lib_dir
+    lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+    if [[ -n "$lib_dir" && -f "$lib_dir/guard_metrics.py" ]]; then
+        echo "$lib_dir/guard_metrics.py"
+        return 0
+    fi
+    if [[ -n "${BUDGET_LIB_DIR:-}" && -f "$BUDGET_LIB_DIR/guard_metrics.py" ]]; then
+        echo "$BUDGET_LIB_DIR/guard_metrics.py"
+        return 0
+    fi
+    return 1
+}
+
+# 渲染保鲜段（JSON 经环境变量传入，内嵌 python 解析渲染中文；single=判定
+# 模式单组合，list=概览/summary 的 per-coder 列表）。JSON 坏则静默跳过。
+_guard_render_metrics() {
+    local mode="$1" json_in="$2"
+    BUDGET_GUARD_METRICS_MODE="$mode" \
+    BUDGET_GUARD_METRICS_JSON="$json_in" \
+        "${BUDGET_PYTHON:-python3}" << 'PYEOF'
+import json
+import os
+import sys
+
+mode = os.environ.get('BUDGET_GUARD_METRICS_MODE', 'single')
+raw = os.environ.get('BUDGET_GUARD_METRICS_JSON', '')
+try:
+    data = json.loads(raw)
+except ValueError:
+    raise SystemExit(0)
+if not isinstance(data, dict):
+    raise SystemExit(0)
+
+conf_label = {'low': '低', 'medium': '中', 'high': '高'}
+
+def label(value):
+    return conf_label.get(value, str(value))
+
+def stale_label(flag):
+    return '是' if flag else '否'
+
+if mode == 'single':
+    n_eff = data.get('n_eff', 0.0)
+    half_life = data.get('half_life_days', 30)
+    print('保鲜: n_eff=%.2f（半衰期 %gd）' % (n_eff, half_life))
+    print('置信: %s' % label(data.get('confidence', 'low')))
+    print('陈旧: %s' % stale_label(data.get('stale', False)))
+    if n_eff < 2 or data.get('stale', False):
+        print('⚠ 记录陈旧/样本不足，降级建议仅供参考')
+else:
+    for item in data.get('per_coder') or []:
+        print('  %s: n_eff=%.2f / 置信: %s / 陈旧: %s' % (
+            item.get('coder', '-'), item.get('n_eff', 0.0),
+            label(item.get('confidence', 'low')), stale_label(item.get('stale', False))))
+PYEOF
+}
+
+# 调 guard_metrics.py 子进程并渲染保鲜段；python 缺失/非零退出/JSON 坏均静默跳过
+_guard_freshness() {
+    local guard_file="$1" coder="$2" tags_arg="$3"
+    local metrics out
+    metrics="$(_guard_metrics_path)" || return 0
+    if [[ -n "$coder" ]]; then
+        out="$(BUDGET_GUARD_FILE="$guard_file" "${BUDGET_PYTHON:-python3}" "$metrics" \
+            --coder "$coder" ${tags_arg:+--tags "$tags_arg"} --json 2>/dev/null)" || return 0
+        _guard_render_metrics single "$out"
+    else
+        out="$(BUDGET_GUARD_FILE="$guard_file" "${BUDGET_PYTHON:-python3}" "$metrics" \
+            --json 2>/dev/null)" || return 0
+        _guard_render_metrics list "$out"
+    fi
+}
+
 # ─── 查询与降级判定 ──────────────────────────────────────────────────────
 
 guard_query() {
@@ -259,6 +336,11 @@ elif failures >= FAIL_THRESHOLD:
 else:
     print('判定: 无降级风险（失败 %d < 2），可按计划分派 %s' % (failures, coder))
 PYEOF
+    local query_rc=$?
+    if [[ $query_rc -eq 0 ]]; then
+        _guard_freshness "$guard_file" "$coder" "$tags_arg"
+    fi
+    return $query_rc
 }
 
 # ─── 汇总与重置 ──────────────────────────────────────────────────────────
@@ -295,6 +377,11 @@ else:
                 tag, total, success, failure, rate))
 print('历史记录: %d 条' % len(history))
 PYEOF
+    local summary_rc=$?
+    if [[ $summary_rc -eq 0 ]]; then
+        _guard_freshness "$guard_file" "" ""
+    fi
+    return $summary_rc
 }
 
 guard_reset() {

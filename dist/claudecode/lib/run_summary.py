@@ -34,6 +34,9 @@ GOAL_STATE_FILENAME = 'goal-state.json'
 START_STATE_FILENAME = 'start-state.json'
 RECENT_LIMIT = 5
 
+# 置信档中文标签（数据层 guard_metrics.py 输出英文机器值 low/medium/high）
+CONF_LABEL = {'low': '低', 'medium': '中', 'high': '高'}
+
 
 def fail(message: str, hint: str | None = None) -> NoReturn:
     """stderr 输出错误 JSON（键排序）并以退出码 1 终止。"""
@@ -174,14 +177,14 @@ def dispatch_stats(state_path: str) -> dict:
 
 
 def guard_section(guard_file: str) -> dict:
-    """Coder Guard 失败与降级史（总记录 / 失败 / 降级 / 最近失败条目）。"""
+    """Coder Guard 失败与降级史（总记录 / 失败 / 降级 / 最近失败条目 + 保鲜）。"""
     data = load_json_quiet(guard_file)
     if data is None:
         return {'available': False, 'path': guard_file}
     history = data.get('history')
     entries = [e for e in history if isinstance(e, dict)] if isinstance(history, list) else []
     failures = [e for e in entries if e.get('result') == 'failure']
-    return {
+    result = {
         'available': True,
         'escalations': sum(1 for e in entries if e.get('escalated_to')),
         'failures': len(failures),
@@ -189,6 +192,33 @@ def guard_section(guard_file: str) -> dict:
         'recent_failures': failures[-RECENT_LIMIT:],
         'total': len(entries),
     }
+    freshness = _guard_freshness(guard_file)
+    if freshness is not None:
+        result['freshness'] = freshness
+    return result
+
+
+def _guard_freshness(guard_file: str) -> list[dict] | None:
+    """保鲜与置信摘要（延迟导入 guard_metrics；导入/取数失败 → None 不展示）。"""
+    try:
+        import guard_metrics
+    except ImportError:
+        return None
+    try:
+        metrics = guard_metrics.load_metrics(guard_file, coder=None)
+    except Exception:
+        return None
+    if not metrics.get('available'):
+        return None
+    return [
+        {
+            'coder': str(item.get('coder', '-')),
+            'n_eff': item.get('n_eff', 0.0),
+            'confidence': str(item.get('confidence', 'low')),
+            'stale': bool(item.get('stale', False)),
+        }
+        for item in metrics.get('per_coder', [])
+    ]
 
 
 # ─── markdown 渲染 ───────────────────────────────────────────────────────
@@ -256,6 +286,14 @@ def render_markdown(change_id: str, mode: str, data: dict, state_path: str,
                     f'{suffix}{tag_suffix}')
         else:
             lines.append('- 无失败记录')
+        freshness = guard.get('freshness')
+        if freshness:
+            lines.append('- 保鲜与置信:')
+            for item in freshness:
+                confidence = CONF_LABEL.get(item['confidence'], item['confidence'])
+                stale = '是' if item['stale'] else '否'
+                lines.append(
+                    f"  - {item['coder']}: n_eff={item['n_eff']:.2f} / 置信: {confidence} / 陈旧: {stale}")
     return '\n'.join(lines) + '\n'
 
 

@@ -35,6 +35,9 @@ import sys
 RECENT_LIMIT = 5
 STATE_DIR_DEPTH = 10
 
+# 置信档中文标签（数据层 guard_metrics.py 输出英文机器值 low/medium/high）
+CONF_LABEL = {'low': '低', 'medium': '中', 'high': '高'}
+
 
 def project_name() -> str:
     """project-name: git 根目录名优先，无 git 退 basename(cwd)（对齐 guard.sh）。"""
@@ -75,14 +78,14 @@ def load_json_quiet(path: str) -> dict | None:
 
 
 def guard_section() -> dict:
-    """Coder Guard 汇总（总记录 / 失败 / 降级 / 最近 5 条）。"""
+    """Coder Guard 汇总（总记录 / 失败 / 降级 / 最近 5 条 + 保鲜与置信）。"""
     path = guard_file_path()
     data = load_json_quiet(path)
     if data is None:
         return {'available': False, 'path': path}
     history = data.get('history')
     entries = [e for e in history if isinstance(e, dict)] if isinstance(history, list) else []
-    return {
+    result = {
         'available': True,
         'escalations': sum(1 for e in entries if e.get('escalated_to')),
         'failures': sum(1 for e in entries if e.get('result') == 'failure'),
@@ -99,6 +102,33 @@ def guard_section() -> dict:
         ],
         'total': len(entries),
     }
+    freshness = _guard_freshness(path)
+    if freshness is not None:
+        result['freshness'] = freshness
+    return result
+
+
+def _guard_freshness(path: str) -> list[dict] | None:
+    """保鲜与置信摘要（延迟导入 guard_metrics；导入/取数失败 → None 不展示）。"""
+    try:
+        import guard_metrics
+    except ImportError:
+        return None
+    try:
+        metrics = guard_metrics.load_metrics(path, coder=None)
+    except Exception:
+        return None
+    if not metrics.get('available'):
+        return None
+    return [
+        {
+            'coder': str(item.get('coder', '-')),
+            'n_eff': item.get('n_eff', 0.0),
+            'confidence': str(item.get('confidence', 'low')),
+            'stale': bool(item.get('stale', False)),
+        }
+        for item in metrics.get('per_coder', [])
+    ]
 
 
 # ─── 数据源 2: 工作流状态机 ──────────────────────────────────────────────
@@ -255,6 +285,14 @@ def render_text(data: dict) -> None:
                 escalated = ' → %s' % entry['escalated_to'] if entry['escalated_to'] else ''
                 print('  %s  %-14s %-8s%s' % (
                     entry['timestamp'], entry['coder'], entry['result'], escalated))
+        freshness = guard.get('freshness')
+        if freshness:
+            print('保鲜与置信:')
+            for item in freshness:
+                confidence = CONF_LABEL.get(item['confidence'], item['confidence'])
+                stale = '是' if item['stale'] else '否'
+                print('  %s: n_eff=%.2f / 置信: %s / 陈旧: %s' % (
+                    item['coder'], item['n_eff'], confidence, stale))
     print()
 
     state = data['state']

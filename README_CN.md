@@ -18,7 +18,8 @@ BudgetBuddy 把一个「全能 AI」变成一支有结构的研发团队：**10 
 - **4 套 persona 主题** — default（专业）、tech-legends、sanguo、shuihu；角色名与称呼随主题切换
 - **执行类 agent 免审批（AutoRun）** — 4 个执行类 sub-agent（coder-lite / coder-standard / coder-senior / tester）默认开启 AutoRun（工具调用免逐条审批）；其余 agent 可用 `budget setup autorun` 管理
 - **通用 webhook 通知** — 企微机器人 / 钉钉机器人（HMAC-SHA256 加签）/ 飞书机器人（卡片）/ 自定义 webhook，11 个工作流事件开关（N1–N11）
-- **Coder Guard 护栏** — 按 coder × 任务标签记录最近 5 次成败；失败 ≥2 次自动触发分级降级
+- **Coder Guard 护栏** — 按 coder × 任务标签记录最近 5 次成败；失败 ≥2 次自动触发分级降级；记录带**保鲜与置信度标签**（指数半衰期、有效样本数、陈旧标注），全读取面统一展示
+- **质量趋势指标** — reviewer 报告末行携带机器可解析的 `budget-verdict` 标记；归档时 recorder 聚合评分/评审轮数/guard 快照到 `metrics.json`，`budget setup stats` 与 run summary 渲染质量趋势段与退化告警（评分连续下滑 / 一次通过率低 / 失败率高）
 - **Goal Loop** — 目标驱动宏循环：定义目标 → 跑 pipeline → 验证 → 未达标则迭代（最多 8 轮，含安全边界）
 - **openspec 变更管理** — propose / apply / archive / explore 命令 + 规格驱动的变更跟踪
 - **多平台构建** — 单一 `core/` 源，`scripts/build.py` 产出 `dist/codebuddy/`、`dist/opencode/`、`dist/claudecode/` 与 `dist/codex/`
@@ -198,7 +199,7 @@ Leader 编排 10 个专职 sub-agent 协同工作。每个角色在 `core/agents
 | `tester` | 验证层 | 运行测试、验证编译、检查构建结果 | 阶段 3，每个 coder 完成后 |
 | `director` | 兜底层 | 3 轮审查全败时终裁（六类根因分型 A–F） | 仅异常路径 |
 | `goal-evaluator` | 验证层 | 目标循环的独立达成/差距判定——只读报告，不执行任何操作 | 仅 goal 循环 |
-| `recorder` | 沉淀层 | 记录开发经验、归档变更、更新文档 | 阶段 5 归档 |
+| `recorder` | 沉淀层 | 记录开发经验、归档变更、采集质量指标、更新文档 | 阶段 5 归档 |
 
 ### 分层协作
 
@@ -230,6 +231,35 @@ flowchart TD
 | `shuihu` | 梁山好汉 | 宋江 / 吴用 / 林冲 |
 
 `budget setup persona list|set|show` 查看与切换主题；`budget setup persona expand` 按当前主题渲染 agent prompt。
+
+## Agent 可观测性
+
+两个查询面特性让你持续掌握 agent 团队的真实表现。二者均为**参考层**——不改降级规则、不触发通知。
+
+### Guard 保鲜与置信度
+
+guard 记忆（驱动分级降级的按 coder 失败记录）在全读取面（`budget setup guard query`、`budget status`、`budget setup stats`、run summary）展示可信度指标：
+
+- **保鲜** — 记录按指数半衰期加权（默认 30 天，`BUDGET_GUARD_HALF_LIFE_DAYS` 可调）：30 天前的记录权重减半，90 天前降至 1/8
+- **有效样本数 `n_eff`** 与**置信档** — 低（<2）/ 中（<4）/ 高（≥4）加权样本
+- **陈旧标注** — 最新记录超过 90 天（`BUDGET_GUARD_STALE_DAYS`；两阈值相互独立）
+- `n_eff` < 2 或陈旧时，降级建议附「仅供参考」标注——硬规则（最近 5 次失败 ≥2）仍然生效
+
+```bash
+budget setup guard query coder-lite   # 降级建议 + 保鲜/置信段
+```
+
+### 质量趋势（任务后持续评估）
+
+每份 reviewer / reviewer-b 报告末行携带机器可解析的 `<!-- budget-verdict: {...} -->` 标记（评分、结论、评审轮次）。归档时——在 `openspec archive` 移动 change 目录**之前**——recorder 聚合这些标记与 guard 快照到 `~/.budgetbuddy/projects/<name>/memory/metrics.json`（按 change 幂等、原子 0600 写入、标记缺失时支持人工参数兜底）。`budget setup stats` 与 run summary 渲染趋势：
+
+- 终审评分序列、Phase 2 一次通过率、guard 失败率
+- 退化告警 — **R1** 评分严格连续下滑、**R2** 一次通过率 < 50%、**R3** 失败率 > 40%（均有最小样本阈值）
+
+```bash
+budget setup stats                              # Coder Guard 护栏 + 质量趋势段
+python3 ~/.budgetbuddy/lib/metrics.py trend --json
+```
 
 ## 架构
 
@@ -298,7 +328,7 @@ flowchart LR
 - **tester 与 reviewer 不可跳过** — 每个任务必须先过 tester 验证、再过 reviewer 审查才算完成
 - **Review Gate 升级** — 审查不通过自动升级 coder 档位（lite → standard → senior），最多 3 轮；单任务循环上限 5 轮（3 轮分级审查 + 2 次同级自修复），超限暂停等待用户
 - **Director 终裁** — 3 轮全败时 Director 做六类根因分型；A/B/C 触发自动恢复，D/E/F 上报用户
-- **Coder Guard** — 分派前 Leader 查询该 coder 在任务标签上的失败记录；最近 5 次失败 ≥2 次即强制降级
+- **Coder Guard** — 分派前 Leader 查询该 coder 在任务标签上的失败记录；最近 5 次失败 ≥2 次即强制降级；保鲜与置信度标签标注这些记录的可信程度
 
 组件级架构图见 [`core/docs/architecture.md`](core/docs/architecture.md)。
 

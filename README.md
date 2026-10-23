@@ -18,7 +18,8 @@ The kit is self-bootstrapped: this repository is developed with BudgetBuddy's ow
 - **4 persona themes** — default (professional), tech-legends, sanguo, shuihu; role names and greetings change with the theme
 - **Execution agents AutoRun** — 4 execution sub-agents (coder-lite / coder-standard / coder-senior / tester) ship with AutoRun on by default (no per-call approval); `budget setup autorun` manages the rest
 - **Universal webhook notifications** — WeCom bot / DingTalk bot (HMAC-SHA256 signed) / Feishu bot (card) / custom webhook, 11 workflow event switches (N1–N11)
-- **Coder Guard** — per-coder, per-task-tag failure records over a 5-attempt window; 2+ failures trigger automatic tier downgrade
+- **Coder Guard** — per-coder, per-task-tag failure records over a 5-attempt window; 2+ failures trigger automatic tier downgrade; records carry **freshness & confidence labels** (exponential half-life decay, effective sample size, stale flag) on every guard read surface
+- **Quality trend metrics** — reviewer reports end with a machine-parsable `budget-verdict` marker; at archive time the recorder aggregates ratings, review rounds and guard snapshots into `metrics.json`, and `budget setup stats` / run summaries render a quality-trend section with drift alerts (declining ratings / low first-pass rate / high failure rate)
 - **Goal Loop** — goal-driven macro loop: define goal → run pipeline → verify → iterate until the goal is met (max 8 iterations, safety boundaries included)
 - **OpenSpec change management** — propose / apply / archive / explore commands with spec-driven change tracking
 - **Multi-platform build** — single `core/` source, `scripts/build.py` emits `dist/codebuddy/`, `dist/opencode/`, `dist/claudecode/`, and `dist/codex/`
@@ -198,7 +199,7 @@ A Leader orchestrates 10 specialized sub-agents. Every role is defined once in `
 | `tester` | Verification | Runs tests, verifies compilation, checks build output | Phase 3, after every coder |
 | `director` | Escalation | Final verdict when 3 review rounds all fail (root-cause classes A–F) | Exception path only |
 | `goal-evaluator` | Verification | Independent achieved/gap verdict for goal loops — reads reports, runs nothing | Goal loop only |
-| `recorder` | Knowledge | Captures lessons, archives changes, updates docs | Phase 5 archive |
+| `recorder` | Knowledge | Captures lessons, archives changes, records quality metrics, updates docs | Phase 5 archive |
 
 ### Role layering
 
@@ -230,6 +231,35 @@ Role names and greetings come from persona themes — 4 themes × 11 roles; only
 | `shuihu` | Liangshan marsh outlaws | Song Jiang / Wu Yong / Lin Chong |
 
 `budget setup persona list|set|show` inspects and switches themes; `budget setup persona expand` renders agent prompts under the active theme.
+
+## Agent Observability
+
+Two query-surface features keep you informed about how the agent team is actually performing. Both are **reference layers** — they never alter the downgrade rules and never fire notifications.
+
+### Guard freshness & confidence
+
+The guard memory (per-coder failure records that drive tier downgrade) is displayed with trust indicators on every read surface — `budget setup guard query`, `budget status`, `budget setup stats`, and run summaries:
+
+- **Freshness** — records are weighted by an exponential half-life (default 30 days; `BUDGET_GUARD_HALF_LIFE_DAYS`): a 30-day-old record counts half, a 90-day-old one an eighth
+- **Effective sample size `n_eff`** and a **confidence tier** — low < 2 / medium < 4 / high ≥ 4 weighted samples
+- **Stale flag** — newest record older than 90 days (`BUDGET_GUARD_STALE_DAYS`; the two thresholds are independent)
+- When `n_eff` < 2 or records are stale, the downgrade advice is annotated "reference-only" — the hard rule (≥2 failures in the last 5 attempts) still applies
+
+```bash
+budget setup guard query coder-lite   # downgrade advice + freshness/confidence block
+```
+
+### Quality trend (post-task evaluation)
+
+Every reviewer / reviewer-b report ends with a machine-parsable `<!-- budget-verdict: {...} -->` marker (rating, conclusion, review round). At archive time — before `openspec archive` moves the change directory — the recorder aggregates these markers plus a guard snapshot into `~/.budgetbuddy/projects/<name>/memory/metrics.json` (idempotent per change, atomic 0600 write, manual CLI fallback when markers are missing). `budget setup stats` and run summaries render the trend:
+
+- Final rating sequence, Phase-2 first-pass rate, guard failure rate
+- Drift alerts — **R1** strictly-declining ratings, **R2** first-pass rate < 50%, **R3** guard failure rate > 40% (minimum sample thresholds apply)
+
+```bash
+budget setup stats                              # Coder Guard 护栏 + quality-trend sections
+python3 ~/.budgetbuddy/lib/metrics.py trend --json
+```
 
 ## Architecture
 
@@ -298,7 +328,7 @@ flowchart LR
 - **tester and reviewer are mandatory** — each task must pass tester verification and reviewer review before it counts as done
 - **Review Gate escalation** — failed review escalates the coder tier (lite → standard → senior), max 3 rounds; a task loop is capped at 5 rounds (3 tiered reviews + 2 self-fixes) before pausing for the user
 - **Director final verdict** — when 3 rounds all fail, Director classifies the root cause (6 classes); A/B/C trigger auto-recovery, D/E/F escalate to the user
-- **Coder Guard** — before dispatch, the Leader checks the coder's failure record for the task tags; 2+ failures in the last 5 attempts force a tier downgrade
+- **Coder Guard** — before dispatch, the Leader checks the coder's failure record for the task tags; 2+ failures in the last 5 attempts force a tier downgrade; freshness & confidence labels annotate how trustworthy those records are
 
 Component-level diagrams live in [`core/docs/architecture.md`](core/docs/architecture.md).
 
